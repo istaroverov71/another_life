@@ -110,8 +110,12 @@ function check(content, runs) {
   console.log(`Регионы: ${top(reg, 8)}`);
   console.log(`Имена: ${top(nm, 10)}`);
   console.log(`Пулы имён семей: ${top(pools, 8)}`);
-  const never = [...seen].filter(([, c]) => c === 0).map(([id]) => id);
-  const forksNever = [...forkSeen].filter(([, c]) => c === 0).map(([id]) => id);
+  const maxAge = Math.max(...DAYS.map((d) => d.ages[1]));
+  const reachable = (id) => { const e = content.events.find((x) => x.id === id); return e.age[0] <= maxAge && !(e.if && e.if.years && e.if.years[0] > 1980 + 32 + maxAge); };
+  const never = [...seen].filter(([id, c]) => c === 0 && reachable(id)).map(([id]) => id);
+  const later = [...seen].filter(([id]) => !reachable(id)).length;
+  console.log(`Событий для взрослых лет (ждут следующих дней): ${later}`);
+  const forksNever = [...forkSeen].filter(([id, c]) => c === 0 && content.forks.find((f) => f.id === id).age[0] <= maxAge).map(([id]) => id);
   const uniq = [...new Set(problems)];
   console.log(`Прожито жизней: ${runs}`);
   console.log(`Сообщений в день: от ${Math.min(...counts)} до ${Math.max(...counts)}, в среднем ${(counts.reduce((a, b) => a + b, 0) / counts.length).toFixed(1)}`);

@@ -137,6 +137,7 @@ function conditionsMet(cond, hero, year) {
   if (!cond) return true;
   if (cond.years && (year < cond.years[0] || year > cond.years[1])) return false;
   if (cond.city && !cond.city.includes(hero.city.type)) return false;
+  if (cond.region_in && !cond.region_in.includes(hero.city.region)) return false;
   if (cond.wealth && !cond.wealth.includes(hero.wealth)) return false;
   if (cond.parents && cond.parents !== hero.parents) return false;
   if (cond.sib && !cond.sib.includes(hero.sib)) return false;
@@ -158,6 +159,11 @@ function applyFx(fx, hero, content) {
     if (fx.move === 'big') {
       const options = all.filter((c) => ['capital', 'million'].includes(c.type) && c.name !== hero.city.name);
       hero.city = pickWeighted(hero.r, options.map((c) => [c, c.pop]));
+    } else if (fx.move === 'abroad') {
+      hero.city = pick(hero.r, [
+        { name: 'Ереван', in: 'в Ереване', type: 'abroad' }, { name: 'Тбилиси', in: 'в Тбилиси', type: 'abroad' },
+        { name: 'Алматы', in: 'в Алматы', type: 'abroad' }, { name: 'Белград', in: 'в Белграде', type: 'abroad' },
+        { name: 'Стамбул', in: 'в Стамбуле', type: 'abroad' }]);
     } else if (fx.move === 'other_capital') {
       hero.city = all.find((c) => c.type === 'capital' && c.name !== hero.city.name);
     }
@@ -197,10 +203,20 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
   if (hero.lastDate === undefined) hero.lastDate = birthAbs;
 
   // Развилка дня: большая, если её возраст попадает в день, иначе одна маленькая.
-  const inDay = (f) => f.age[0] <= a1 && f.age[1] >= a0;
+  const inDay = (f) => f.age[0] <= a1 && f.age[1] >= a0 && !f.years;
+  // Календарная развилка (например, осень 2022-го): ищем подходящий месяц внутри дня.
+  const calendarDate = (f) => {
+    for (let d = birthAbs + a0 * 12; d < birthAbs + (a1 + 1) * 12; d++) {
+      const y = Math.floor(d / 12); const age = ageAt(d);
+      if (y >= f.years[0] && y <= f.years[1] && (!f.months || f.months.includes((d % 12) + 1))
+        && age >= f.age[0] && age <= f.age[1] && conditionsMet(f.if, hero, y)) return d;
+    }
+    return null;
+  };
+  const priority = content.forks.filter((f) => f.priority && f.years).map((f) => [f, calendarDate(f)]).find(([, d]) => d !== null);
   const big = content.forks.find((f) => f.kind === 'big' && inDay(f));
   const smalls = content.forks.filter((f) => f.kind !== 'big' && inDay(f));
-  const fork = big || (smalls.length ? pickWeighted(r, smalls.map((f) => [f, f.weight || 1])) : null);
+  const fork = big || (priority ? priority[0] : null) || (smalls.length ? pickWeighted(r, smalls.map((f) => [f, f.weight || 1])) : null);
 
   // Слоты: по одному на каждый год дня, плюс 0–2 лишних, всего событий от 5 до 8.
   const slots = [];
@@ -226,7 +242,9 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
     const first = slots.find((x) => x.year === 0);
     first.birth = true; first.date = birthAbs;
   }
-  if (fork && !big) {
+  if (fork && !big && priority && fork === priority[0]) {
+    slots.push({ date: priority[1], year: ageAt(priority[1]), fork: true });
+  } else if (fork && !big) {
     const ys = years.filter((y) => y >= fork.age[0] && y <= fork.age[1]);
     const y = ys.length ? pick(r, ys) : years[years.length - 1];
     slots.push({ date: birthAbs + y * 12 + Math.floor(r() * 12), year: y, fork: true });
