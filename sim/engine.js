@@ -5,12 +5,22 @@
 const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль',
   'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
-// Дни жизни и возраст, который они покрывают. Пока написан только контент
-// детства, поэтому здесь два дня. Остальные добавятся вместе с контентом.
+// Дни жизни и возраст, который они покрывают. У каждого года — минимум одно
+// сообщение, поэтому в день помещается не больше 6–7 лет. Пока написан только
+// контент детства, остальные дни добавятся вместе с контентом.
 const DAYS = [
-  { day: 1, ages: [0, 8] },
-  { day: 2, ages: [9, 17] },
+  { day: 1, ages: [0, 5] },
+  { day: 2, ages: [6, 11] },
+  { day: 3, ages: [12, 17] },
 ];
+
+function ageWord(n) {
+  if (n === 0) return 'до года';
+  const d = n % 10; const h = n % 100;
+  if (d === 1 && h !== 11) return `${n} год`;
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return `${n} года`;
+  return `${n} лет`;
+}
 
 // Окно отправки: с 9:00 до 20:00. Утро до 12, день до 17, вечер до 20.
 const PERIOD = (minutes) => (minutes < 12 * 60 ? 'm' : minutes < 17 * 60 ? 'd' : 'e');
@@ -182,78 +192,85 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
   const r = hero.r;
   const [a0, a1] = dayPlan.ages;
   const out = [];
-  const n = 5 + Math.floor(r() * 4); // 5–8 сообщений
-  const times = clockTimes(r, n + 1); // +1 место под развилку
-  const ages = times.map((_, i) => a0 + ((a1 + 1 - a0) * (i + r() * 0.9)) / times.length);
-
-  // Какая развилка будет сегодня и в каком слоте.
-  const forksToday = content.forks.filter((f) => f.day === dayPlan.day);
-  let fork = null;
-  let forkSlot = -1;
-  const big = forksToday.find((f) => f.kind === 'big');
-  if (big) {
-    // Большая развилка закрывает день. Два сообщения перед ней — уже её возраст
-    // (например, выпускной перед выбором «что после школы»).
-    fork = big; forkSlot = times.length - 1;
-    // Остальные сообщения дня растягиваем до возраста развилки, чтобы не было провалов.
-    // Для конца школы граница — май выпускного года, иначе даты пойдут не по порядку.
-    let edge = big.age[0];
-    if (big.id === 'fk_after_school') {
-      const schoolYear = hero.birthYear + 17 + (hero.birthMonth >= 8 ? 1 : 0);
-      edge = ((schoolYear - hero.birthYear) * 12 + 4 - hero.birthMonth) / 12 - 0.05;
-    }
-    for (let k = 0; k < forkSlot - 2; k++) ages[k] = a0 + ((edge - a0) * (k + r() * 0.9)) / (forkSlot - 2);
-    ages[forkSlot] = big.age[0] + 0.7;
-    ages[forkSlot - 1] = big.age[0] + 0.5;
-    ages[forkSlot - 2] = Math.max(ages[forkSlot - 3] ?? 0, big.age[0] + 0.3);
-  }
-  else if (forksToday.length) {
-    fork = pickWeighted(r, forksToday.map((f) => [f, f.weight || 1]));
-    const candidates = ages.map((a, i) => i).filter((i) => Math.floor(ages[i]) >= fork.age[0] && Math.floor(ages[i]) <= fork.age[1]);
-    forkSlot = candidates.length ? pick(r, candidates) : times.length - 1;
-    ages[forkSlot] = Math.max(ages[forkSlot], fork.age[0]);
-  }
-
-  // Дата каждого слота в месяцах от нулевого года. Конец школы привязан к календарю:
-  // последний звонок в мае, экзамены и выпускной в июне, выбор «что дальше» в июле.
   const birthAbs = hero.birthYear * 12 + hero.birthMonth;
-  const slotDates = ages.map((a, i) => {
-    if (big && big.id === 'fk_after_school' && i >= forkSlot - 2) {
-      const schoolYear = hero.birthYear + 17 + (hero.birthMonth >= 8 ? 1 : 0);
-      return schoolYear * 12 + 6 - (forkSlot - i);
-    }
-    return birthAbs + Math.floor(a * 12);
-  });
+  const ageAt = (d) => Math.floor((d - birthAbs) / 12);
   if (hero.lastDate === undefined) hero.lastDate = birthAbs;
 
-  // Куда во времени можно поставить событие в этом слоте. Сезонные события
-  // (первое сентября, лагерь летом) ищут свой месяц между соседними сообщениями.
+  // Развилка дня: большая, если её возраст попадает в день, иначе одна маленькая.
+  const inDay = (f) => f.age[0] <= a1 && f.age[1] >= a0;
+  const big = content.forks.find((f) => f.kind === 'big' && inDay(f));
+  const smalls = content.forks.filter((f) => f.kind !== 'big' && inDay(f));
+  const fork = big || (smalls.length ? pickWeighted(r, smalls.map((f) => [f, f.weight || 1])) : null);
+
+  // Слоты: по одному на каждый год дня, плюс 0–2 лишних, всего событий от 5 до 8.
+  const slots = [];
+  let years = [];
+  for (let y = a0; y <= a1; y++) years.push(y);
+  // Конец школы привязан к календарю: последний звонок в мае, выпускной в июне, выбор в июле.
+  if (big && big.id === 'fk_after_school') {
+    const G = hero.birthYear + 17 + (hero.birthMonth > 4 ? 1 : 0);
+    years = years.filter((y) => y < 17);
+    slots.push({ date: G * 12 + 4, fixed: true }, { date: G * 12 + 5, fixed: true }, { date: G * 12 + 6, fixed: true, fork: true });
+  }
+  const counts = Object.fromEntries(years.map((y) => [y, 1]));
+  const fixedEvents = slots.filter((x) => !x.fork).length;
+  const total = Math.min(8, Math.max(5, years.length + fixedEvents + Math.floor(r() * 3)));
+  const extraYears = years.filter((y) => !(dayPlan.day === 1 && y === 0)); // год 0 занят рождением
+  for (let k = years.length + fixedEvents; k < total; k++) counts[pick(r, extraYears)]++;
+  for (const y of years) {
+    const months = [];
+    while (months.length < counts[y]) { const m = Math.floor(r() * 12); if (!months.includes(m)) months.push(m); }
+    months.sort((a, b) => a - b).forEach((m) => slots.push({ date: birthAbs + y * 12 + m, year: y }));
+  }
+  if (dayPlan.day === 1) {
+    const first = slots.find((x) => x.year === 0);
+    first.birth = true; first.date = birthAbs;
+  }
+  if (fork && !big) {
+    const ys = years.filter((y) => y >= fork.age[0] && y <= fork.age[1]);
+    const y = ys.length ? pick(r, ys) : years[years.length - 1];
+    slots.push({ date: birthAbs + y * 12 + Math.floor(r() * 12), year: y, fork: true });
+  }
+  slots.sort((a, b) => a.date - b.date || (a.fork ? 1 : 0) - (b.fork ? 1 : 0));
+  const times = clockTimes(r, slots.length);
+
+  const labelOf = (d) => `${MONTHS[d % 12]} ${Math.floor(d / 12)} · ${ageWord(ageAt(d))}`;
+
+  // Куда во времени можно поставить событие: внутри своего года жизни и не раньше
+  // предыдущего сообщения. Сезонные события ищут свой месяц в этом окне.
   const place = (e, i) => {
-    const lo = hero.lastDate;
-    const hi = i + 1 < slotDates.length ? slotDates[i + 1] : slotDates[i] + 6;
+    const slot = slots[i];
+    let lo; let hi;
+    if (slot.fixed) { lo = slot.date; hi = slot.date; } else {
+      const ys = birthAbs + slot.year * 12;
+      lo = Math.max(hero.lastDate, ys);
+      const next = slots.slice(i + 1).find((x) => !x.fork);
+      hi = Math.min(ys + 11, next ? next.date : ys + 11);
+    }
+    if (lo > hi) return null;
     const ok = (d) => {
-      const age = Math.floor((d - birthAbs) / 12);
+      const age = ageAt(d);
       return age >= e.age[0] && age <= e.age[1] && conditionsMet(e.if, hero, Math.floor(d / 12));
     };
-    if (!e.months) { const d = Math.max(slotDates[i], lo); return ok(d) ? d : null; }
+    if (!e.months) { const d = Math.max(slot.date, lo); return d <= hi && ok(d) ? d : null; }
     let best = null;
-    for (let d = lo; d <= Math.min(hi, lo + 48); d++) {
-      if (e.months.includes((d % 12) + 1) && ok(d) && (best === null || Math.abs(d - slotDates[i]) < Math.abs(best - slotDates[i]))) best = d;
+    for (let d = lo; d <= hi; d++) {
+      if (e.months.includes((d % 12) + 1) && ok(d) && (best === null || Math.abs(d - slot.date) < Math.abs(best - slot.date))) best = d;
     }
     return best;
   };
-  const labelOf = (d) => `${MONTHS[d % 12]} ${Math.floor(d / 12)}`;
 
-  for (let i = 0; i < times.length; i++) {
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
     const clock = `${String(Math.floor(times[i] / 60)).padStart(2, '0')}:${String(times[i] % 60).padStart(2, '0')}`;
 
-    if (dayPlan.day === 1 && i === 0) {
-      out.push({ clock, label: labelOf(birthAbs), text: birthMessage(hero, content), type: 'birth' });
+    if (slot.birth) {
+      out.push({ clock, label: `${MONTHS[hero.birthMonth]} ${hero.birthYear} · рождение`, text: birthMessage(hero, content), type: 'birth' });
       continue;
     }
 
-    if (i === forkSlot && fork) {
-      const d = Math.max(slotDates[i], hero.lastDate);
+    if (slot.fork) {
+      const d = Math.max(slot.date, hero.lastDate);
       hero.lastDate = d;
       const options = fork.options.filter((o) => conditionsMet(o.if, hero, Math.floor(d / 12)));
       const chosenIdx = chooseFork ? chooseFork(fork, options) : Math.floor(r() * options.length);
@@ -278,15 +295,23 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
       const d = place(e, i);
       if (d !== null) pool.push([e, d]);
     }
-    if (!pool.length) continue;
-    const timeFactor = (e) => (e.time === period ? 4 : e.time === 'any' || !e.time ? 2 : 0.3);
-    // Обязательные события (рождение брата, первый класс) ставим первыми.
-    const must = pool.filter(([e]) => e.must);
-    const [ev, d] = must.length ? must[0] : pickWeighted(r, pool.map((p) => [p, (p[0].weight || 1) * timeFactor(p[0])]));
-    hero.used.add(ev.id);
+    let ev; let d;
+    if (pool.length) {
+      const timeFactor = (e) => (e.time === period ? 4 : e.time === 'any' || !e.time ? 2 : 0.3);
+      // Обязательные события (рождение брата, первый класс) ставим первыми, запасные — в последнюю очередь.
+      const must = pool.filter(([e]) => e.must);
+      const use = must.length ? [must[0]] : pool;
+      [ev, d] = pickWeighted(r, use.map((p) => [p, (p[0].weight || (p[0].filler ? 0.7 : 1)) * timeFactor(p[0])]));
+      hero.used.add(ev.id);
+    } else {
+      // Подстраховка: год не должен пропадать, даже если подходящих событий не осталось.
+      d = Math.max(slot.date, hero.lastDate);
+      const key = ageAt(d) < 7 ? 'quiet_year_small' : 'quiet_year_school';
+      ev = { id: key, text: pick(r, content.fills[key]) };
+    }
     hero.lastDate = d;
     applyFx(ev.fx, hero, content);
-    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, text: render(ev.text, hero, content) });
+    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, text: render(ev.text, hero, content), age: ageAt(d) });
   }
   return out;
 }

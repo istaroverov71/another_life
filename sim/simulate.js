@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { liveLife } = require('./engine');
+const { liveLife, DAYS } = require('./engine');
 
 const ROOT = path.join(__dirname, '..');
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -56,6 +56,14 @@ function check(content, runs) {
   const forkSeen = new Map(content.forks.map((f) => [f.id, 0]));
   const counts = [];
   const ids = new Set();
+  let quiet = 0;
+  // Запретные слова и темы (см. research/russia.md, раздел «Политика и религия»).
+  const FORBIDDEN = /войн|путин|сво\b|мобилиз|санкци|президент|депутат|митинг|протест|выборы|крым|донбасс|украин/i;
+  for (const e of [...content.events, ...content.forks]) {
+    const texts = [e.text, ...(e.options || []).flatMap((o) => [o.label, o.result])];
+    for (const t of texts) if (FORBIDDEN.test(t)) problems.push(`Запретная тема в ${e.id}: ${t}`);
+  }
+  for (const [k, list] of Object.entries(content.fills)) for (const t of list) if (FORBIDDEN.test(t)) problems.push(`Запретная тема в fills.${k}: ${t}`);
   for (const e of [...content.events, ...content.forks]) {
     if (ids.has(e.id)) problems.push(`Повторяющийся id: ${e.id}`);
     ids.add(e.id);
@@ -66,6 +74,17 @@ function check(content, runs) {
     let last = null;
     for (const d of life.days) {
       counts.push(d.messages.length);
+      // Каждый год жизни должен встретиться хотя бы в одном сообщении.
+      const plan = DAYS.find((p) => p.day === d.day);
+      const seenAges = new Set(d.messages.map((m) => {
+        const tail = m.label.split(' · ')[1] || '';
+        return tail === 'рождение' || tail === 'до года' ? 0 : parseInt(tail, 10);
+      }));
+      for (let y = plan.ages[0]; y <= plan.ages[1]; y++) {
+        if (!seenAges.has(y)) problems.push(`Пропущен год ${y} (день ${d.day}, жизнь ${i + 1})`);
+      }
+      if (d.messages.some((m) => m.type !== 'birth' && !/ · (до года|\d+ (год|года|лет))$/.test(m.label))) problems.push(`Нет возраста в подписи (жизнь ${i + 1})`);
+      if (d.messages.filter((m) => m.type !== 'fork').length > 8) problems.push(`Больше 8 сообщений в день (день ${d.day}, жизнь ${i + 1})`);
       for (const m of d.messages) {
         const [mn, yr] = m.label.split(' ');
         const t = Number(yr) * 12 + ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'].indexOf(mn);
@@ -74,7 +93,7 @@ function check(content, runs) {
         const all = [m.text, m.result || ''].join(' ');
         if (/[{}]/.test(all)) problems.push(`Незаполненная переменная (${m.id || m.type}, жизнь ${i + 1}): ${all}`);
         if (/  |\s[.,]/.test(all)) problems.push(`Лишний пробел (${m.id}, жизнь ${i + 1}): ${all}`);
-        if (m.type === 'event') seen.set(m.id, seen.get(m.id) + 1);
+        if (m.type === 'event') { if (seen.has(m.id)) seen.set(m.id, seen.get(m.id) + 1); else quiet++; }
         if (m.type === 'fork') forkSeen.set(m.id, forkSeen.get(m.id) + 1);
       }
     }
@@ -97,6 +116,7 @@ function check(content, runs) {
   console.log(`Прожито жизней: ${runs}`);
   console.log(`Сообщений в день: от ${Math.min(...counts)} до ${Math.max(...counts)}, в среднем ${(counts.reduce((a, b) => a + b, 0) / counts.length).toFixed(1)}`);
   console.log(`Событий в базе: ${content.events.length}, развилок: ${content.forks.length}`);
+  console.log(`Запасных «спокойных лет» (событий не хватило): ${quiet} на ${runs} жизней`);
   console.log(`Ни разу не выпали события: ${never.length ? never.join(', ') : 'нет'}`);
   console.log(`Ни разу не выпали развилки: ${forksNever.length ? forksNever.join(', ') : 'нет'}`);
   console.log(`Проблем: ${uniq.length}`);
