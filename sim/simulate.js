@@ -62,6 +62,8 @@ function check(content, runs) {
   for (const e of [...content.events, ...content.forks]) {
     const texts = [e.text, ...(e.options || []).flatMap((o) => [o.label, o.result])];
     for (const t of texts) if (FORBIDDEN.test(t)) problems.push(`Запретная тема в ${e.id}: ${t}`);
+    // Частая ошибка в формах рода: «смеялся{|ась}» даёт «смеялсяась».
+    for (const t of texts) if (t && /ся\{\||сь\{\|/.test(t)) problems.push(`Ошибка формы рода в ${e.id}: ${t}`);
   }
   for (const [k, list] of Object.entries(content.fills)) for (const t of list) if (FORBIDDEN.test(t)) problems.push(`Запретная тема в fills.${k}: ${t}`);
   for (const e of [...content.events, ...content.forks]) {
