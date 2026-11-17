@@ -8,11 +8,17 @@ const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', '�
 // Дни жизни и возраст, который они покрывают. У каждого года — минимум одно
 // сообщение, поэтому в день помещается не больше 6–7 лет. Пока написан только
 // контент детства, остальные дни добавятся вместе с контентом.
-const DAYS = [
-  { day: 1, ages: [0, 5] },
-  { day: 2, ages: [6, 11] },
-  { day: 3, ages: [12, 17] },
-];
+// Полный план жизни на 21 день (см. концепцию, раздел «Темп»).
+const LIFE_PLAN = [
+  [0, 5], [6, 11], [12, 17],
+  [18, 20], [21, 22],
+  [23, 24], [25, 26], [27, 28], [29, 30], [31, 33], [34, 36], [37, 38], [39, 40],
+  [41, 44], [45, 48], [49, 52], [53, 56], [57, 60],
+  [61, 67], [68, 74], [75, 100],
+].map((ages, i) => ({ day: i + 1, ages }));
+// Дни, для которых уже написан контент.
+const DAYS = LIFE_PLAN.filter((d) => d.ages[1] <= 17);
+const dayOfAge = (age) => LIFE_PLAN.find((d) => age >= d.ages[0] && age <= d.ages[1]).day;
 
 function ageWord(n) {
   if (n === 0) return 'до года';
@@ -65,7 +71,8 @@ function pickName(r, content, pool, gender, birthYear, avoid = []) {
 
 // Место рождения: регион по числу родившихся в этом году, внутри региона —
 // город по населению или сельская местность.
-function pickBirthplace(r, content, birthYear) {
+function pickBirthplace(r, content, birthYear, forced) {
+  if (forced) return forced;
   const y = String(Math.min(2012, Math.max(1980, birthYear)));
   const region = pickWeighted(r, content.regions.map((g) => [g, g.births[y]]));
   const options = region.cities.map((c) => [{ ...c, region: region.id }, c.pop]);
@@ -76,13 +83,14 @@ function pickBirthplace(r, content, birthYear) {
     const t = pickWeighted(r, region.towns.map((x) => [x, x.pop]));
     return { region, city: { name: `посёлок ${t.name}`, in: `в посёлке ${t.name}`, type: 'village', region: region.id } };
   }
-  return { region, city: { name: `${region.village_word.replace('в ', '')} ${region.in}`, in: `${region.village_word} ${region.in}`, type: 'village', region: region.id } };
+  const word = { 'в селе': 'село', 'в деревне': 'деревня', 'в станице': 'станица' }[region.village_word];
+  return { region, city: { name: `${word}, ${region.id}`, in: `${region.village_word} ${region.in}`, type: 'village', region: region.id } };
 }
 
-function createHero(content, { birthYear, seed }) {
+function createHero(content, { birthYear, seed, place }) {
   const r = rng(seed);
   const start = content.start;
-  const { region, city } = pickBirthplace(r, content, birthYear);
+  const { region, city } = pickBirthplace(r, content, birthYear, place);
   const gender = r() < 0.514 ? 'm' : 'f'; // 105–106 мальчиков на 100 девочек
   const familyPool = pickPool(r, region);
   const name = pickName(r, content, familyPool, gender, birthYear);
@@ -119,8 +127,10 @@ function render(text, hero, content) {
   return text
     .replace(/\{s:([^}]*)\}/g, (_, spec) => forms(spec, hero.sibling?.gender ?? 'm'))
     .replace(/\{fr:([^}]*)\}/g, (_, spec) => forms(spec, hero.friend.gender))
+    .replace(/\{p:([^}]*)\}/g, (_, spec) => forms(spec, hero.partner?.gender ?? 'm'))
     .replace(/\{([^{}:]*\|[^{}]*)\}/g, (_, spec) => forms(spec, g))
     .replace(/\{name\}/g, hero.name)
+    .replace(/\{partner\}/g, hero.partner?.name ?? '')
     .replace(/\{in\}/g, hero.city.in)
     .replace(/\{to\}/g, hero.city.to || hero.city.in)
     .replace(/\{city\}/g, hero.city.name)
@@ -201,7 +211,7 @@ function birthMessage(hero, content) {
   return text[0].toUpperCase() + text.slice(1);
 }
 
-function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
+function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
   const r = hero.r;
   const [a0, a1] = dayPlan.ages;
   const out = [];
@@ -234,6 +244,13 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
     const G = hero.birthYear + 17 + (hero.birthMonth > 4 ? 1 : 0);
     years = years.filter((y) => y < 17);
     slots.push({ date: G * 12 + 4, fixed: true }, { date: G * 12 + 5, fixed: true }, { date: G * 12 + 6, fixed: true, fork: true });
+  }
+  // Встреча в режиме «вдвоём»: фиксированная дата, одинаковая у обоих героев.
+  // Её год уже покрыт самой встречей, отдельное сообщение для него не нужно.
+  if (meeting && meeting.date >= birthAbs + a0 * 12 && meeting.date < birthAbs + (a1 + 1) * 12) {
+    const y = ageAt(meeting.date);
+    years = years.filter((x) => x !== y);
+    slots.push({ date: meeting.date, fixed: true, meeting: true });
   }
   const counts = Object.fromEntries(years.map((y) => [y, 1]));
   const fixedEvents = slots.filter((x) => !x.fork).length;
@@ -289,6 +306,12 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
     const slot = slots[i];
     const clock = `${String(Math.floor(times[i] / 60)).padStart(2, '0')}:${String(times[i] % 60).padStart(2, '0')}`;
 
+    if (slot.meeting) {
+      hero.lastDate = Math.max(hero.lastDate, slot.date);
+      out.push({ clock, label: labelOf(slot.date), type: 'meeting', id: meeting.id, text: render(meeting.text(hero), hero, content), date: slot.date });
+      if (!hero.flags.includes('met_partner')) hero.flags.push('met_partner');
+      continue;
+    }
     if (slot.birth) {
       out.push({ clock, label: `${MONTHS[hero.birthMonth]} ${hero.birthYear} · рождение`, text: birthMessage(hero, content), type: 'birth' });
       continue;
@@ -336,7 +359,7 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
     }
     hero.lastDate = d;
     applyFx(ev.fx, hero, content);
-    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, text: render(ev.text, hero, content), age: ageAt(d) });
+    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, text: render(ev.text, hero, content), age: ageAt(d), date: d });
   }
   return out;
 }
@@ -347,4 +370,69 @@ function liveLife(content, { birthYear, seed, chooseFork }) {
   return { hero, days };
 }
 
-module.exports = { liveLife, liveDay, createHero, render, DAYS };
+// ---------- Режим «вдвоём» ----------
+
+// Дата встречи в месяцах. Должна попасть в один и тот же день игры у обоих героев,
+// иначе друзья увидят встречу в разные дни.
+function meetingDate(r, a, b, ageFrom, ageTo, months) {
+  const birthA = a.birthYear * 12 + a.birthMonth;
+  const birthB = b.birthYear * 12 + b.birthMonth;
+  const ok = [];
+  for (let d = Math.max(birthA, birthB) + ageFrom * 12; d <= Math.min(birthA, birthB) + (ageTo + 1) * 12 - 1; d++) {
+    const ageA = Math.floor((d - birthA) / 12); const ageB = Math.floor((d - birthB) / 12);
+    if (ageA < ageFrom || ageB < ageFrom || ageA > ageTo || ageB > ageTo) continue;
+    if (dayOfAge(ageA) !== dayOfAge(ageB)) continue;
+    if (months && !months.includes((d % 12) + 1)) continue;
+    ok.push(d);
+  }
+  return ok.length ? pick(r, ok) : null;
+}
+
+// План встречи. Гарантия: встреча всегда есть и всегда до 30 лет.
+function planMeeting(content, a, b, r) {
+  const sameCity = a.birthCity.name === b.birthCity.name;
+  const pickScenario = (kind, ageFrom, ageTo) => {
+    const list = content.meetings.filter((m) => m.kind === kind && m.age[0] <= ageTo && m.age[1] >= ageFrom);
+    for (const m of [...list].sort(() => r() - 0.5)) {
+      const d = meetingDate(r, a, b, Math.max(ageFrom, m.age[0]), Math.min(ageTo, m.age[1]), m.months);
+      if (d !== null) return { scenario: m, date: d };
+    }
+    return null;
+  };
+  let plan = null;
+  if (sameCity) plan = pickScenario('childhood', 6, 14);
+  // Иначе — встреча во взрослой жизни, по умолчанию 18–26, запасной сценарий «издалека».
+  if (!plan) plan = pickScenario('far', 18, 26);
+  // Страховка: если ничего не подошло, ищем любой сценарий до 29 лет включительно.
+  if (!plan) plan = pickScenario('far', 18, 29) || pickScenario('same_city', 15, 29);
+  return plan;
+}
+
+function liveDuo(content, { birthYear, seedA, seedB, sameCityChance = 0.3, chooseFork }) {
+  const r = rng(seedA * 31 + seedB);
+  const a = createHero(content, { birthYear, seed: seedA });
+  // В одном городе — значит и имена, и окружение второго героя из этого же региона.
+  const same = r() < sameCityChance;
+  const b = createHero(content, { birthYear, seed: seedB, place: same ? { region: a.region, city: a.birthCity } : undefined });
+  a.partner = { name: b.name, gender: b.gender };
+  b.partner = { name: a.name, gender: a.gender };
+  let plan = planMeeting(content, a, b, r);
+  const days = [];
+  for (const dayPlan of DAYS) {
+    // Если оба героя уже живут в одном городе, встреча может случиться раньше плана.
+    if (plan && !a.flags.includes('met_partner') && dayPlan.day > 3 && a.city.name === b.city.name) {
+      const early = content.meetings.find((m) => m.kind === 'same_city');
+      const d = meetingDate(r, a, b, dayPlan.ages[0], dayPlan.ages[1]);
+      if (d !== null && d < plan.date) plan = { scenario: early, date: d };
+    }
+    const meeting = plan && { id: plan.scenario.id, date: plan.date, text: () => plan.scenario.text };
+    days.push({
+      day: dayPlan.day,
+      a: liveDay(a, content, dayPlan, { chooseFork, meeting }),
+      b: liveDay(b, content, dayPlan, { chooseFork, meeting }),
+    });
+  }
+  return { a, b, plan, days };
+}
+
+module.exports = { liveLife, liveDay, createHero, render, DAYS, LIFE_PLAN, dayOfAge, planMeeting, liveDuo };

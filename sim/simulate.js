@@ -21,6 +21,7 @@ function loadContent() {
     names: readJson(path.join(ROOT, 'content/world/names.json')),
     start: readJson(path.join(ROOT, 'content/world/start.json')),
     events, forks, fills,
+    meetings: readJson(path.join(ROOT, 'content/duo/meetings.json')).meetings,
   };
 }
 
@@ -59,9 +60,11 @@ function check(content, runs) {
   let quiet = 0;
   // Запретные слова и темы (см. research/russia.md, раздел «Политика и религия»).
   const FORBIDDEN = /войн|путин|сво\b|мобилиз|санкци|президент|депутат|митинг|протест|выборы|крым|донбасс|украин/i;
-  for (const e of [...content.events, ...content.forks]) {
+  for (const e of [...content.events, ...content.forks, ...content.meetings]) {
     const texts = [e.text, ...(e.options || []).flatMap((o) => [o.label, o.result])];
     for (const t of texts) if (FORBIDDEN.test(t)) problems.push(`Запретная тема в ${e.id}: ${t}`);
+    // Имя всегда в именительном падеже: после предлогов и в конструкциях вроде «ему достаётся» его ставить нельзя.
+    for (const t of texts) if (t && /(^|[\s«(])(у|к|с|со|для|без|от|о|об|про|за|при|по|перед|над|под) \{name\}|\{name\} (достаётся|кажется|нравится|хочется|повезло)/i.test(t)) problems.push(`Имя не в именительном падеже в ${e.id}: ${t}`);
     // Частая ошибка в формах рода: «смеялся{|ась}» даёт «смеялсяась».
     for (const t of texts) if (t && /ся\{\||сь\{\|/.test(t)) problems.push(`Ошибка формы рода в ${e.id}: ${t}`);
   }
@@ -131,7 +134,8 @@ function check(content, runs) {
 }
 
 const content = loadContent();
-if (arg('check')) {
+module.exports = { loadContent };
+if (require.main !== module) { /* используется как модуль */ } else if (arg('check')) {
   process.exit(check(content, Number(arg('check'))) ? 0 : 1);
 } else {
   const year = Number(arg('year', 1995));
