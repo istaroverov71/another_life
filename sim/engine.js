@@ -35,44 +35,66 @@ function pickWeighted(r, entries) {
 }
 const clamp = (v) => Math.max(0, Math.min(100, v));
 
-function namePool(content, poolKey, gender, birthYear) {
-  const names = content.names;
-  if (poolKey === 'ru') {
-    const decade = String(Math.min(2010, Math.max(1980, Math.floor(birthYear / 10) * 10)));
-    return names.ru[decade][gender];
-  }
-  return names[poolKey][gender];
+// Пул имён семьи: русские имена года рождения или национальные (по доле в регионе).
+function pickPool(r, region) {
+  return pickWeighted(r, Object.entries(region.names));
 }
 
-function pickName(r, content, city, gender, birthYear, avoid = []) {
-  const mix = city.names || { ru: 1 };
-  const pool = pickWeighted(r, Object.entries(mix));
-  const list = namePool(content, pool, gender, birthYear).filter((n) => !avoid.includes(n));
-  return pick(r, list);
+function pickName(r, content, pool, gender, birthYear, avoid = []) {
+  let entries;
+  if (pool === 'ru') {
+    const y = String(Math.min(2012, Math.max(1980, birthYear)));
+    entries = Object.entries(content.names.ru[y][gender]);
+  } else {
+    const period = birthYear < 2000 ? 'old' : 'new';
+    entries = content.names.ethnic[pool][period][gender].map((n) => [n, 1]);
+  }
+  entries = entries.filter(([n]) => !avoid.includes(n));
+  return pickWeighted(r, entries);
+}
+
+// Место рождения: регион по числу родившихся в этом году, внутри региона —
+// город по населению или сельская местность.
+function pickBirthplace(r, content, birthYear) {
+  const y = String(Math.min(2012, Math.max(1980, birthYear)));
+  const region = pickWeighted(r, content.regions.map((g) => [g, g.births[y]]));
+  const options = region.cities.map((c) => [{ ...c, region: region.id }, c.pop]);
+  if (region.rural_weight > 0) options.push([{ rural: true }, region.rural_weight]);
+  const place = pickWeighted(r, options);
+  if (!place.rural) return { region, city: place };
+  if (region.towns.length && r() < 0.35) {
+    const t = pickWeighted(r, region.towns.map((x) => [x, x.pop]));
+    return { region, city: { name: `посёлок ${t.name}`, in: `в посёлке ${t.name}`, type: 'village', region: region.id } };
+  }
+  return { region, city: { name: `${region.village_word.replace('в ', '')} ${region.in}`, in: `${region.village_word} ${region.in}`, type: 'village', region: region.id } };
 }
 
 function createHero(content, { birthYear, seed }) {
   const r = rng(seed);
   const start = content.start;
-  const city = pickWeighted(r, content.cities.map((c) => [c, c.weight]));
-  const gender = r() < 0.5 ? 'm' : 'f';
-  const name = pickName(r, content, city, gender, birthYear);
+  const { region, city } = pickBirthplace(r, content, birthYear);
+  const gender = r() < 0.514 ? 'm' : 'f'; // 105–106 мальчиков на 100 девочек
+  const familyPool = pickPool(r, region);
+  const name = pickName(r, content, familyPool, gender, birthYear);
   const wealth = pickWeighted(r, Object.entries(start.wealth).map(([k, v]) => [k, v.weight]));
   const parents = pickWeighted(r, Object.entries(start.parents).map(([k, v]) => [k, v.weight]));
   const sib = pickWeighted(r, Object.entries(start.siblings).map(([k, v]) => [k, v.weight]));
   const trait = pickWeighted(r, Object.entries(start.traits).map(([k, v]) => [k, v.weight]));
-  const sibGender = r() < 0.5 ? 'm' : 'f';
-  const friendName = pickName(r, content, city, gender, birthYear, [name]);
+  const sibGender = r() < 0.514 ? 'm' : 'f';
+  // Брат или сестра — из той же семьи, поэтому имя из того же пула.
+  const sibling = sib === 'none' ? null : {
+    gender: sibGender,
+    name: pickName(r, content, familyPool, sibGender, birthYear + (sib === 'younger' ? 3 : -3), [name]),
+  };
+  // Друзья и первая любовь — из окружения, их пул выбирается отдельно.
+  const friendName = pickName(r, content, pickPool(r, region), gender, birthYear, [name, sibling?.name]);
   const crushGender = gender === 'm' ? 'f' : 'm';
   return {
     seed, birthYear, birthMonth: Math.floor(r() * 12), gender, name,
-    birthCity: city, city, wealth, parents, sib, trait,
-    sibling: sib === 'none' ? null : {
-      gender: sibGender,
-      name: pickName(r, content, city, sibGender, birthYear + (sib === 'younger' ? 3 : -3), [name, friendName]),
-    },
+    region, birthCity: city, city, wealth, parents, sib, trait, familyPool,
+    sibling,
     friend: { gender, name: friendName },
-    crush: { gender: crushGender, name: pickName(r, content, city, crushGender, birthYear) },
+    crush: { gender: crushGender, name: pickName(r, content, pickPool(r, region), crushGender, birthYear) },
     stats: { ...start.stats_start, money: wealth === 'low' ? 30 : wealth === 'high' ? 75 : 50 },
     flags: [],
     used: new Set(),
@@ -121,11 +143,14 @@ function applyFx(fx, hero, content) {
     if (fx[k]) hero.stats[k] = clamp(hero.stats[k] + fx[k]);
   }
   for (const f of fx.flags || []) if (!hero.flags.includes(f)) hero.flags.push(f);
-  if (fx.move === 'big') {
-    const options = content.cities.filter((c) => ['capital', 'million'].includes(c.type) && c.name !== hero.city.name);
-    hero.city = pickWeighted(hero.r, options.map((c) => [c, c.weight]));
-  } else if (fx.move === 'other_capital') {
-    hero.city = content.cities.find((c) => c.type === 'capital' && c.name !== hero.city.name);
+  if (fx.move) {
+    const all = content.regions.flatMap((g) => g.cities.map((c) => ({ ...c, region: g.id })));
+    if (fx.move === 'big') {
+      const options = all.filter((c) => ['capital', 'million'].includes(c.type) && c.name !== hero.city.name);
+      hero.city = pickWeighted(hero.r, options.map((c) => [c, c.pop]));
+    } else if (fx.move === 'other_capital') {
+      hero.city = all.find((c) => c.type === 'capital' && c.name !== hero.city.name);
+    }
   }
 }
 

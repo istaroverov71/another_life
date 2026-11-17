@@ -17,7 +17,7 @@ function loadContent() {
   for (const file of dir('events')) { events.push(...file.events); Object.assign(fills, file.fills || {}); }
   for (const file of dir('forks')) forks.push(...file.forks);
   return {
-    cities: readJson(path.join(ROOT, 'content/world/cities.json')).cities,
+    regions: readJson(path.join(ROOT, 'content/world/regions.json')).regions,
     names: readJson(path.join(ROOT, 'content/world/names.json')),
     start: readJson(path.join(ROOT, 'content/world/start.json')),
     events, forks, fills,
@@ -31,8 +31,8 @@ function arg(name, def) {
 
 function toMarkdown(life) {
   const h = life.hero;
-  const lines = [`# ${h.name}, ${h.birthYear} · ${h.birthCity.name}`, '',
-    `Пол: ${h.gender === 'm' ? 'мужской' : 'женский'} · Семья: ${h.wealth} · Родители: ${h.parents} · Брат/сестра: ${h.sib} · Характер: ${h.trait}`, ''];
+  const lines = [`# ${h.name}, ${h.birthYear} · ${h.birthCity.name} (${h.region.id})`, '',
+    `Пол: ${h.gender === 'm' ? 'мужской' : 'женский'} · Семья: ${h.wealth} · Родители: ${h.parents} · Брат/сестра: ${h.sib} · Характер: ${h.trait} · Имена семьи: ${h.familyPool}`, ''];
   for (const d of life.days) {
     lines.push(`## День ${d.day}`, '');
     for (const m of d.messages) {
@@ -79,6 +79,18 @@ function check(content, runs) {
       }
     }
   }
+  // Проверка распределений: пол, регионы, имена.
+  const g = { m: 0, f: 0 }; const reg = {}; const nm = {}; const pools = {};
+  for (let i = 0; i < runs; i++) {
+    const h = liveLife(content, { birthYear: 1980 + (i % 33), seed: 100000 + i }).hero;
+    g[h.gender]++; reg[h.region.id] = (reg[h.region.id] || 0) + 1; nm[h.name] = (nm[h.name] || 0) + 1;
+    pools[h.familyPool] = (pools[h.familyPool] || 0) + 1;
+  }
+  const top = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => `${k} ${(100 * v / runs).toFixed(1)}%`).join(', ');
+  console.log(`Мальчиков: ${(100 * g.m / runs).toFixed(1)}%`);
+  console.log(`Регионы: ${top(reg, 8)}`);
+  console.log(`Имена: ${top(nm, 10)}`);
+  console.log(`Пулы имён семей: ${top(pools, 8)}`);
   const never = [...seen].filter(([, c]) => c === 0).map(([id]) => id);
   const forksNever = [...forkSeen].filter(([, c]) => c === 0).map(([id]) => id);
   const uniq = [...new Set(problems)];
