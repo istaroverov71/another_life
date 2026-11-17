@@ -40,7 +40,12 @@
             "move": "abroad"
           }
         }
-      ]
+      ],
+      "if": {
+        "not": [
+          "abroad"
+        ]
+      }
     }
   ]
 }

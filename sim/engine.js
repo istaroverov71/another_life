@@ -138,6 +138,8 @@ function conditionsMet(cond, hero, year) {
   if (cond.years && (year < cond.years[0] || year > cond.years[1])) return false;
   if (cond.city && !cond.city.includes(hero.city.type)) return false;
   if (cond.region_in && !cond.region_in.includes(hero.city.region)) return false;
+  if (cond.city_name && !cond.city_name.includes(hero.city.name)) return false;
+  if (cond.min_years_abroad && (hero.abroadSince === undefined || year - Math.floor(hero.abroadSince / 12) < cond.min_years_abroad)) return false;
   if (cond.wealth && !cond.wealth.includes(hero.wealth)) return false;
   if (cond.parents && cond.parents !== hero.parents) return false;
   if (cond.sib && !cond.sib.includes(hero.sib)) return false;
@@ -154,12 +156,17 @@ function applyFx(fx, hero, content) {
     if (fx[k]) hero.stats[k] = clamp(hero.stats[k] + fx[k]);
   }
   for (const f of fx.flags || []) if (!hero.flags.includes(f)) hero.flags.push(f);
+  for (const f of fx.unflags || []) hero.flags = hero.flags.filter((x) => x !== f);
   if (fx.move) {
     const all = content.regions.flatMap((g) => g.cities.map((c) => ({ ...c, region: g.id })));
     if (fx.move === 'big') {
       const options = all.filter((c) => ['capital', 'million'].includes(c.type) && c.name !== hero.city.name);
       hero.city = pickWeighted(hero.r, options.map((c) => [c, c.pop]));
+    } else if (fx.move === 'home') {
+      hero.city = hero.homeCity || hero.birthCity;
     } else if (fx.move === 'abroad') {
+      hero.homeCity = hero.city;
+      hero.abroadSince = hero.lastDate;
       hero.city = pick(hero.r, [
         { name: 'Ереван', in: 'в Ереване', type: 'abroad' }, { name: 'Тбилиси', in: 'в Тбилиси', type: 'abroad' },
         { name: 'Алматы', in: 'в Алматы', type: 'abroad' }, { name: 'Белград', in: 'в Белграде', type: 'abroad' },
@@ -203,7 +210,7 @@ function liveDay(hero, content, dayPlan, { chooseFork } = {}) {
   if (hero.lastDate === undefined) hero.lastDate = birthAbs;
 
   // Развилка дня: большая, если её возраст попадает в день, иначе одна маленькая.
-  const inDay = (f) => f.age[0] <= a1 && f.age[1] >= a0 && !f.years;
+  const inDay = (f) => f.age[0] <= a1 && f.age[1] >= a0 && !f.years && conditionsMet(f.if, hero, Math.floor((birthAbs + a0 * 12) / 12));
   // Календарная развилка (например, осень 2022-го): ищем подходящий месяц внутри дня.
   const calendarDate = (f) => {
     for (let d = birthAbs + a0 * 12; d < birthAbs + (a1 + 1) * 12; d++) {
@@ -340,4 +347,4 @@ function liveLife(content, { birthYear, seed, chooseFork }) {
   return { hero, days };
 }
 
-module.exports = { liveLife, createHero, render, DAYS };
+module.exports = { liveLife, liveDay, createHero, render, DAYS };
