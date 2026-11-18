@@ -285,15 +285,34 @@ function meets(n, hero, kidsBonus = 0, jobBonus = false) {
   return hero.kids.length + kidsBonus >= n.kids;
 }
 const textsOf = (obj) => obj.texts || [obj.text];
+// Заранее разобранные требования вариантов: обычно у всех вариантов они одинаковые.
+const VARIANTS = new WeakMap();
+function variantInfo(obj) {
+  let v = VARIANTS.get(obj);
+  if (!v) {
+    const texts = textsOf(obj);
+    const needs = texts.map(needsOfStr);
+    const key = (n) => `${n.spouse}${n.ex}${n.sib}${n.job}${n.kids}`;
+    v = {
+      texts, needs, same: needs.every((n) => key(n) === key(needs[0])),
+      bonus: obj.options && needsOf(obj).makesChild ? 1 : 0,
+      jobBonus: !!(obj.fx && obj.fx.job) || !!(obj.options && needsOf(obj).makesJob),
+    };
+    VARIANTS.set(obj, v);
+  }
+  return v;
+}
 // Варианты текста, подходящие герою прямо сейчас.
 function okTexts(obj, hero) {
-  const bonus = obj.options && needsOf(obj).makesChild ? 1 : 0;
-  const jobBonus = !!(obj.fx && obj.fx.job) || !!(obj.options && needsOf(obj).makesJob);
-  return textsOf(obj).filter((t) => meets(needsOfStr(t), hero, bonus, jobBonus));
+  const v = variantInfo(obj);
+  if (v.same) return meets(v.needs[0], hero, v.bonus, v.jobBonus) ? v.texts : [];
+  return v.texts.filter((t, i) => meets(v.needs[i], hero, v.bonus, v.jobBonus));
 }
 function peopleOk(obj, hero) {
   if (obj.options && !meets(needsOf(obj), hero)) return false;
-  return okTexts(obj, hero).length > 0;
+  const v = variantInfo(obj);
+  if (v.same) return meets(v.needs[0], hero, v.bonus, v.jobBonus);
+  return v.needs.some((n) => meets(n, hero, v.bonus, v.jobBonus));
 }
 // Выбор варианта: случайный из подходящих. Возвращает текст и его номер.
 function pickText(obj, hero) {

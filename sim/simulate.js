@@ -86,7 +86,7 @@ function check(content, runs) {
     // Имя всегда в именительном падеже: после предлогов и в конструкциях вроде «ему достаётся» его ставить нельзя.
     for (const t of texts) if (t && /(^|[\s«(])(у|к|с|со|для|без|от|о|об|про|за|при|по|перед|над|под) \{name\}|\{name\} (достаётся|кажется|нравится|хочется|повезло)|(отдать|отдавать|позвать|поздравить|увидеть|любить|назвать|взять|забрать|отвести) \{name\}/i.test(t)) problems.push(`Имя не в именительном падеже в ${e.id}: ${t}`);
     // Частая ошибка в формах рода: «смеялся{|ась}» даёт «смеялсяась».
-    for (const t of texts) if (t && /ся\{\||сь\{\|/.test(t)) problems.push(`Ошибка формы рода в ${e.id}: ${t}`);
+    for (const t of texts) if (t && /ся\{\||сь\{\||\{\|ась\}/.test(t)) problems.push(`Ошибка формы рода в ${e.id}: ${t}`);
   }
   for (const [k, list] of Object.entries(content.fills)) for (const t of list) if (FORBIDDEN.test(t)) problems.push(`Запретная тема в fills.${k}: ${t}`);
   for (const e of [...content.events, ...content.forks]) {

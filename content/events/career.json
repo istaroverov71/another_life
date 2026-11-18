@@ -146,7 +146,8 @@
       },
       "fx": {
         "happy": 3
-      }
+      },
+      "weight": 0.5
     },
     {
       "id": "job_boss_bad",
@@ -171,7 +172,8 @@
       },
       "fx": {
         "happy": -3
-      }
+      },
+      "weight": 0.5
     },
     {
       "id": "job_layoff",
@@ -200,7 +202,8 @@
         "money": -4,
         "happy": -2
       },
-      "render_after": true
+      "render_after": true,
+      "weight": 0.5
     },
     {
       "id": "job_remote_2020",
@@ -307,7 +310,8 @@
       },
       "fx": {
         "happy": 3
-      }
+      },
+      "weight": 0.7
     },
     {
       "id": "job_young_boss",
@@ -329,7 +333,8 @@
           "own_business",
           "retired"
         ]
-      }
+      },
+      "weight": 0.5
     },
     {
       "id": "it_conference",
