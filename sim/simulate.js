@@ -15,13 +15,14 @@ function loadContent() {
     .map((f) => readJson(path.join(ROOT, 'content', d, f)));
   const events = []; const forks = []; const fills = {};
   for (const file of dir('events')) { events.push(...file.events); Object.assign(fills, file.fills || {}); }
-  for (const file of dir('forks')) forks.push(...file.forks);
+  for (const file of dir('forks')) { forks.push(...file.forks); Object.assign(fills, file.fills || {}); }
   return {
     regions: readJson(path.join(ROOT, 'content/world/regions.json')).regions,
     names: readJson(path.join(ROOT, 'content/world/names.json')),
     start: readJson(path.join(ROOT, 'content/world/start.json')),
     events, forks, fills,
     meetings: readJson(path.join(ROOT, 'content/duo/meetings.json')).meetings,
+    deaths: readJson(path.join(ROOT, 'content/endings/deaths.json')).deaths,
   };
 }
 
@@ -79,20 +80,30 @@ function check(content, runs) {
     let last = null;
     for (const d of life.days) {
       counts.push(d.messages.length);
-      // Каждый год жизни должен встретиться хотя бы в одном сообщении.
+      // Каждый год жизни должен встретиться хотя бы в одном сообщении (до года смерти).
       const plan = DAYS.find((p) => p.day === d.day);
-      const seenAges = new Set(d.messages.map((m) => {
+      const seenAges = new Set();
+      for (const m of d.messages) {
+        if (m.type === 'final') continue;
         const tail = m.label.split(' · ')[1] || '';
-        return tail === 'рождение' || tail === 'до года' ? 0 : parseInt(tail, 10);
-      }));
-      for (let y = plan.ages[0]; y <= plan.ages[1]; y++) {
+        if (tail === 'рождение' || tail === 'до года') { seenAges.add(0); continue; }
+        const range = tail.match(/^(\d+)–(\d+)/);
+        if (range) { for (let y = +range[1]; y <= +range[2]; y++) seenAges.add(y); continue; }
+        seenAges.add(parseInt(tail, 10));
+      }
+      const lastAge = life.hero.dead && d === life.days[life.days.length - 1] ? Math.max(...seenAges) : plan.ages[1];
+      for (let y = plan.ages[0]; y <= Math.min(plan.ages[1], lastAge); y++) {
         if (!seenAges.has(y)) problems.push(`Пропущен год ${y} (день ${d.day}, жизнь ${i + 1})`);
       }
-      if (d.messages.some((m) => m.type !== 'birth' && !/ · (до года|\d+ (год|года|лет))$/.test(m.label))) problems.push(`Нет возраста в подписи (жизнь ${i + 1})`);
-      if (d.messages.filter((m) => m.type !== 'fork').length > 8) problems.push(`Больше 8 сообщений в день (день ${d.day}, жизнь ${i + 1})`);
+      if (d.messages.some((m) => !['birth', 'final'].includes(m.type) && !/ · (до года|\d+ (год|года|лет)|\d+–\d+ (год|года|лет))$/.test(m.label))) problems.push(`Нет возраста в подписи (жизнь ${i + 1}): ${d.messages.map((m) => m.label).join(' | ')}`);
+      if (d.messages.filter((m) => !['fork', 'death', 'final', 'meeting'].includes(m.type)).length > 8) problems.push(`Больше 8 сообщений в день (день ${d.day}, жизнь ${i + 1})`);
       for (const m of d.messages) {
-        const [mn, yr] = m.label.split(' ');
-        const t = Number(yr) * 12 + ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'].indexOf(mn);
+        if (m.type === 'final') continue;
+        const [mn, yrRaw] = m.label.split(' ');
+        const yr = parseInt(m.label.match(/\d{4}/)[0], 10);
+        const mi = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'].indexOf(mn);
+        const t = m.type === 'span' ? m.date : yr * 12 + (mi < 0 ? 0 : mi);
+        void yrRaw;
         if (last !== null && t < last) problems.push(`Нарушен порядок дат (${m.id || m.type}, жизнь ${i + 1}): ${m.label}`);
         last = t;
         const all = [m.text, m.result || ''].join(' ');

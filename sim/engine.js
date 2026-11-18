@@ -16,8 +16,7 @@ const LIFE_PLAN = [
   [41, 44], [45, 48], [49, 52], [53, 56], [57, 60],
   [61, 67], [68, 74], [75, 100],
 ].map((ages, i) => ({ day: i + 1, ages }));
-// Дни, для которых уже написан контент.
-const DAYS = LIFE_PLAN.filter((d) => d.ages[1] <= 17);
+const DAYS = LIFE_PLAN;
 const dayOfAge = (age) => LIFE_PLAN.find((d) => age >= d.ages[0] && age <= d.ages[1]).day;
 
 function ageWord(n) {
@@ -114,10 +113,38 @@ function createHero(content, { birthYear, seed, place }) {
     friend: { gender, name: friendName },
     crush: { gender: crushGender, name: pickName(r, content, pickPool(r, region), crushGender, birthYear) },
     stats: { ...start.stats_start, money: wealth === 'low' ? 30 : wealth === 'high' ? 75 : 50 },
+    // Возраст смерти: средняя продолжительность жизни в регионе для этого пола (Росстат, 2023)
+    // с поправкой на то, что герой точно доживает до 30, и разбросом. Здоровье потом сдвигает его.
+    deathBase: deathAge(r, region, gender),
+    deathMonth: Math.floor(r() * 12),
+    // Когда уходят родители: отцу и матери примерно на 25–30 лет больше, чем герою.
+    dadDue: 44 + Math.floor(r() * 16),
+    momDue: 50 + Math.floor(r() * 16),
+    kids: [],
+    forkLog: [],
+    cities: [city.name],
     flags: [],
     used: new Set(),
     r,
   };
+}
+
+function deathAge(r, region, gender) {
+  const le = region.life_expectancy[gender] || (gender === 'm' ? 68 : 79);
+  const mean = le + (gender === 'm' ? 4 : 2);
+  const sd = gender === 'm' ? 10 : 9;
+  const z = Math.sqrt(-2 * Math.log(r() || 1e-9)) * Math.cos(2 * Math.PI * r());
+  return Math.round(Math.max(30, Math.min(97, mean + sd * z)));
+}
+
+// Итоговый возраст смерти: хорошее здоровье добавляет годы, плохое — отнимает.
+function effectiveDeathAge(hero) {
+  return Math.max(30, Math.min(99, hero.deathBase + Math.round((hero.stats.health - 65) / 8)));
+}
+
+function newPerson(r, content, hero, gender, birthYear) {
+  const region = hero.city.region ? content.regions.find((g) => g.id === hero.city.region) || hero.region : hero.region;
+  return { gender, birthYear, name: pickName(r, content, pickPool(r, region), gender, birthYear, [hero.name]) };
 }
 
 // Подстановка переменных в текст.
@@ -128,9 +155,17 @@ function render(text, hero, content) {
     .replace(/\{s:([^}]*)\}/g, (_, spec) => forms(spec, hero.sibling?.gender ?? 'm'))
     .replace(/\{fr:([^}]*)\}/g, (_, spec) => forms(spec, hero.friend.gender))
     .replace(/\{p:([^}]*)\}/g, (_, spec) => forms(spec, hero.partner?.gender ?? 'm'))
+    .replace(/\{sp:([^}]*)\}/g, (_, spec) => forms(spec, hero.spouse?.gender ?? (hero.gender === 'm' ? 'f' : 'm')))
+    .replace(/\{ex:([^}]*)\}/g, (_, spec) => forms(spec, hero.ex?.gender ?? (hero.gender === 'm' ? 'f' : 'm')))
+    .replace(/\{k1:([^}]*)\}/g, (_, spec) => forms(spec, hero.kids[0]?.gender ?? 'm'))
+    .replace(/\{k2:([^}]*)\}/g, (_, spec) => forms(spec, hero.kids[1]?.gender ?? 'm'))
     .replace(/\{([^{}:]*\|[^{}]*)\}/g, (_, spec) => forms(spec, g))
     .replace(/\{name\}/g, hero.name)
     .replace(/\{partner\}/g, hero.partner?.name ?? '')
+    .replace(/\{spouse\}/g, hero.spouse?.name ?? '')
+    .replace(/\{ex\}/g, hero.ex?.name ?? '')
+    .replace(/\{kid1\}/g, hero.kids[0]?.name ?? '')
+    .replace(/\{kid2\}/g, hero.kids[1]?.name ?? '')
     .replace(/\{in\}/g, hero.city.in)
     .replace(/\{to\}/g, hero.city.to || hero.city.in)
     .replace(/\{city\}/g, hero.city.name)
@@ -143,12 +178,50 @@ function render(text, hero, content) {
     });
 }
 
-function conditionsMet(cond, hero, year) {
+// Текст упоминает супруга, ребёнка, брата и т. д. — значит, этот человек должен существовать.
+const NEEDS = new WeakMap();
+function needsOf(obj) {
+  let n = NEEDS.get(obj);
+  if (!n) {
+    const t = JSON.stringify([obj.text, obj.options]);
+    const makesChild = /"child":true/.test(JSON.stringify(obj.options || []));
+    const makesSpouse = /"spouse":"new"/.test(JSON.stringify(obj.options || []));
+    n = {
+      spouse: /\{(spouse|sp:)/.test(JSON.stringify([obj.text])) || (!makesSpouse && /\{(spouse|sp:)/.test(t)), ex: /\{(ex\}|ex:)/.test(t), sib: /\{(sib\}|s:)/.test(t),
+      kids: /\{(kid2|k2:)/.test(t) ? (makesChild ? 1 : 2) : /\{(kid1|k1:)/.test(t) ? (makesChild ? 0 : 1) : 0,
+    };
+    NEEDS.set(obj, n);
+  }
+  return n;
+}
+function peopleOk(obj, hero) {
+  const n = needsOf(obj);
+  if (n.spouse && !hero.spouse) return false;
+  if (n.ex && !hero.ex) return false;
+  if (n.sib && !hero.sibling) return false;
+  if (hero.kids.length < n.kids) return false;
+  return true;
+}
+
+function conditionsMet(cond, hero, year, obj) {
+  if (obj && !peopleOk(obj, hero)) return false;
   if (!cond) return true;
   if (cond.years && (year < cond.years[0] || year > cond.years[1])) return false;
   if (cond.city && !cond.city.includes(hero.city.type)) return false;
   if (cond.region_in && !cond.region_in.includes(hero.city.region)) return false;
   if (cond.city_name && !cond.city_name.includes(hero.city.name)) return false;
+  const heroAge = year - hero.birthYear;
+  if (cond.dad_due && heroAge < hero.dadDue) return false;
+  if (cond.mom_due && heroAge < hero.momDue) return false;
+  if (cond.spouse_due && (!hero.spouse || year - hero.spouse.birthYear < hero.spouse.deathAge)) return false;
+  if (cond.kids_min !== undefined && hero.kids.length < cond.kids_min) return false;
+  if (cond.kids_max !== undefined && hero.kids.length > cond.kids_max) return false;
+  if (cond.kid_age && (!hero.kids.length || year - hero.kids[0].birthYear < cond.kid_age[0] || year - hero.kids[0].birthYear > cond.kid_age[1])) return false;
+  if (cond.health_max !== undefined && hero.stats.health > cond.health_max) return false;
+  if (cond.health_min !== undefined && hero.stats.health < cond.health_min) return false;
+  if (cond.money_max !== undefined && hero.stats.money > cond.money_max) return false;
+  if (cond.money_min !== undefined && hero.stats.money < cond.money_min) return false;
+  if (cond.any && !cond.any.some((f) => hero.flags.includes(f))) return false;
   if (cond.min_years_abroad && (hero.abroadSince === undefined || year - Math.floor(hero.abroadSince / 12) < cond.min_years_abroad)) return false;
   if (cond.wealth && !cond.wealth.includes(hero.wealth)) return false;
   if (cond.parents && cond.parents !== hero.parents) return false;
@@ -167,6 +240,35 @@ function applyFx(fx, hero, content) {
   }
   for (const f of fx.flags || []) if (!hero.flags.includes(f)) hero.flags.push(f);
   for (const f of fx.unflags || []) hero.flags = hero.flags.filter((x) => x !== f);
+  const year = Math.floor((hero.lastDate ?? 0) / 12);
+  const age = year - hero.birthYear;
+  if (fx.spouse === 'new') {
+    const g = hero.gender === 'm' ? 'f' : 'm';
+    hero.spouse = newPerson(hero.r, content, hero, g, hero.birthYear + Math.floor(hero.r() * 5) - 2);
+    hero.spouse.deathAge = deathAge(hero.r, hero.region, g);
+  }
+  if (fx.breakup) {
+    hero.ex = hero.spouse; hero.spouse = null;
+    hero.flags = hero.flags.filter((x) => !['dating', 'together', 'engaged'].includes(x));
+  }
+  if (fx.child) {
+    const g = hero.r() < 0.514 ? 'm' : 'f';
+    const kid = { gender: g, birthYear: year, name: pickName(hero.r, content, hero.familyPool, g, Math.min(2012, year), hero.kids.map((k) => k.name).concat([hero.name])) };
+    hero.kids.push(kid);
+    if (!hero.flags.includes('has_kids')) hero.flags.push('has_kids');
+  }
+  if (fx.divorce) {
+    hero.ex = hero.spouse; hero.spouse = null;
+    hero.flags = hero.flags.filter((x) => !['married', 'dating', 'together'].includes(x));
+    if (!hero.flags.includes('divorced')) hero.flags.push('divorced');
+    if (!hero.flags.includes('ever_divorced')) hero.flags.push('ever_divorced');
+  }
+  if (fx.widowed) {
+    hero.ex = hero.spouse; hero.spouse = null;
+    hero.flags = hero.flags.filter((x) => !['married', 'dating', 'together'].includes(x));
+    hero.flags.push('widowed');
+  }
+  void age;
   if (fx.move) {
     const all = content.regions.flatMap((g) => g.cities.map((c) => ({ ...c, region: g.id })));
     if (fx.move === 'big') {
@@ -181,9 +283,18 @@ function applyFx(fx, hero, content) {
         { name: 'Ереван', in: 'в Ереване', type: 'abroad' }, { name: 'Тбилиси', in: 'в Тбилиси', type: 'abroad' },
         { name: 'Алматы', in: 'в Алматы', type: 'abroad' }, { name: 'Белград', in: 'в Белграде', type: 'abroad' },
         { name: 'Стамбул', in: 'в Стамбуле', type: 'abroad' }]);
+    } else if (fx.move === 'capital') {
+      hero.city = all.find((c) => c.name === (hero.city.name === 'Москва' ? 'Санкт-Петербург' : 'Москва'));
+    } else if (fx.move === 'region_center') {
+      const reg = content.regions.find((g) => g.id === (hero.city.region || hero.region.id)) || hero.region;
+      hero.city = { ...reg.cities[0], region: reg.id };
+    } else if (fx.move === 'sea') {
+      const sea = all.filter((c) => ['Сочи', 'Новороссийск', 'Краснодар', 'Калининград'].includes(c.name));
+      hero.city = pick(hero.r, sea);
     } else if (fx.move === 'other_capital') {
       hero.city = all.find((c) => c.type === 'capital' && c.name !== hero.city.name);
     }
+    if (hero.cities[hero.cities.length - 1] !== hero.city.name) hero.cities.push(hero.city.name);
   }
 }
 
@@ -220,20 +331,20 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
   if (hero.lastDate === undefined) hero.lastDate = birthAbs;
 
   // Развилка дня: большая, если её возраст попадает в день, иначе одна маленькая.
-  const inDay = (f) => f.age[0] <= a1 && f.age[1] >= a0 && !f.years && conditionsMet(f.if, hero, Math.floor((birthAbs + a0 * 12) / 12));
+  const inDay = (f) => f.age[0] <= a1 && f.age[1] >= a0 && !f.years && conditionsMet(f.if, hero, Math.floor((birthAbs + a0 * 12) / 12), f);
   // Календарная развилка (например, осень 2022-го): ищем подходящий месяц внутри дня.
   const calendarDate = (f) => {
     for (let d = birthAbs + a0 * 12; d < birthAbs + (a1 + 1) * 12; d++) {
       const y = Math.floor(d / 12); const age = ageAt(d);
       if (y >= f.years[0] && y <= f.years[1] && (!f.months || f.months.includes((d % 12) + 1))
-        && age >= f.age[0] && age <= f.age[1] && conditionsMet(f.if, hero, y)) return d;
+        && age >= f.age[0] && age <= f.age[1] && conditionsMet(f.if, hero, y, f)) return d;
     }
     return null;
   };
   const priority = content.forks.filter((f) => f.priority && f.years).map((f) => [f, calendarDate(f)]).find(([, d]) => d !== null);
   const big = content.forks.find((f) => f.kind === 'big' && inDay(f));
   const smalls = content.forks.filter((f) => f.kind !== 'big' && inDay(f));
-  const fork = big || (priority ? priority[0] : null) || (smalls.length ? pickWeighted(r, smalls.map((f) => [f, f.weight || 1])) : null);
+  let fork = big || (priority ? priority[0] : null) || (smalls.length ? pickWeighted(r, smalls.map((f) => [f, f.weight || 1])) : null);
 
   // Слоты: по одному на каждый год дня, плюс 0–2 лишних, всего событий от 5 до 8.
   const slots = [];
@@ -245,6 +356,16 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
     years = years.filter((y) => y < 17);
     slots.push({ date: G * 12 + 4, fixed: true }, { date: G * 12 + 5, fixed: true }, { date: G * 12 + 6, fixed: true, fork: true });
   }
+  // Смерть: если она приходится на этот день, годы после неё не нужны, а её год
+  // покрывает само сообщение о смерти.
+  const dAge = effectiveDeathAge(hero);
+  let deathDate = null;
+  // Если здоровье сдвинуло возраст смерти на уже прошедшие годы, смерть приходит в этом дне.
+  if (dAge <= a1 && a0 >= 18) {
+    deathDate = Math.max(birthAbs + Math.max(dAge, a0) * 12 + hero.deathMonth, hero.lastDate + 1);
+    years = years.filter((y) => y < ageAt(deathDate));
+    slots.push({ date: deathDate, fixed: true, death: true });
+  }
   // Встреча в режиме «вдвоём»: фиксированная дата, одинаковая у обоих героев.
   // Её год уже покрыт самой встречей, отдельное сообщение для него не нужно.
   if (meeting && meeting.date >= birthAbs + a0 * 12 && meeting.date < birthAbs + (a1 + 1) * 12) {
@@ -252,11 +373,19 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
     years = years.filter((x) => x !== y);
     slots.push({ date: meeting.date, fixed: true, meeting: true });
   }
+  // Глубокая старость: если лет больше, чем помещается сообщений, тихие годы
+  // объединяются в одно сообщение с диапазоном — так ни один год не пропадает.
+  if (years.length > 7) {
+    const groups = Array.from({ length: 7 }, () => []);
+    years.forEach((y, i) => groups[Math.floor((i * 7) / years.length)].push(y));
+    years = groups.filter((g) => g.length === 1).map((g) => g[0]);
+    for (const g of groups.filter((x) => x.length > 1)) slots.push({ date: birthAbs + g[0] * 12 + Math.floor(r() * 6), span: g, year: g[0] });
+  }
   const counts = Object.fromEntries(years.map((y) => [y, 1]));
   const fixedEvents = slots.filter((x) => !x.fork).length;
   const total = Math.min(8, Math.max(5, years.length + fixedEvents + Math.floor(r() * 3)));
   const extraYears = years.filter((y) => !(dayPlan.day === 1 && y === 0)); // год 0 занят рождением
-  for (let k = years.length + fixedEvents; k < total; k++) counts[pick(r, extraYears)]++;
+  for (let k = years.length + fixedEvents; k < total && extraYears.length; k++) counts[pick(r, extraYears)]++;
   for (const y of years) {
     const months = [];
     while (months.length < counts[y]) { const m = Math.floor(r() * 12); if (!months.includes(m)) months.push(m); }
@@ -266,9 +395,9 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
     const first = slots.find((x) => x.year === 0);
     first.birth = true; first.date = birthAbs;
   }
-  if (fork && !big && priority && fork === priority[0]) {
+  if (fork && !big && priority && fork === priority[0] && (!deathDate || priority[1] < deathDate)) {
     slots.push({ date: priority[1], year: ageAt(priority[1]), fork: true });
-  } else if (fork && !big) {
+  } else if (fork && !big && years.length) {
     const ys = years.filter((y) => y >= fork.age[0] && y <= fork.age[1]);
     const y = ys.length ? pick(r, ys) : years[years.length - 1];
     slots.push({ date: birthAbs + y * 12 + Math.floor(r() * 12), year: y, fork: true });
@@ -277,6 +406,7 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
   const times = clockTimes(r, slots.length);
 
   const labelOf = (d) => `${MONTHS[d % 12]} ${Math.floor(d / 12)} · ${ageWord(ageAt(d))}`;
+  const spanLabel = (g) => `${hero.birthYear + g[0] + (hero.birthMonth > 0 ? 0 : 0)}–${hero.birthYear + g[g.length - 1]} · ${g[0]}–${ageWord(g[g.length - 1])}`;
 
   // Куда во времени можно поставить событие: внутри своего года жизни и не раньше
   // предыдущего сообщения. Сезонные события ищут свой месяц в этом окне.
@@ -292,7 +422,7 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
     if (lo > hi) return null;
     const ok = (d) => {
       const age = ageAt(d);
-      return age >= e.age[0] && age <= e.age[1] && conditionsMet(e.if, hero, Math.floor(d / 12));
+      return age >= e.age[0] && age <= e.age[1] && conditionsMet(e.if, hero, Math.floor(d / 12), e);
     };
     if (!e.months) { const d = Math.max(slot.date, lo); return d <= hi && ok(d) ? d : null; }
     let best = null;
@@ -306,6 +436,28 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
     const slot = slots[i];
     const clock = `${String(Math.floor(times[i] / 60)).padStart(2, '0')}:${String(times[i] % 60).padStart(2, '0')}`;
 
+    if (slot.death) {
+      const d = Math.max(slot.date, hero.lastDate);
+      hero.lastDate = d;
+      const pool = content.deaths.filter((e) => conditionsMet(e.if, hero, Math.floor(d / 12), e) && ageAt(d) >= (e.age || [0])[0] && ageAt(d) <= (e.age || [0, 200])[1]);
+      const ev = pickWeighted(r, pool.map((e) => [e, e.weight || 1]));
+      out.push({ clock, label: labelOf(d), type: 'death', id: ev.id, text: render(ev.text, hero, content).replace('{age}', ageWord(ageAt(d))), date: d });
+      hero.dead = true; hero.deathDate = d;
+      out.push({ clock: '20:00', label: 'Итог жизни', type: 'final', text: finale(hero, content) });
+      break;
+    }
+    if (slot.span) {
+      const d = Math.max(slot.date, hero.lastDate);
+      const pool = content.events.filter((e) => e.span && !hero.used.has(e.id) && e.age[0] <= slot.span[slot.span.length - 1] && e.age[1] >= slot.span[0]
+        && conditionsMet(e.if, hero, Math.floor(d / 12), e));
+      const ev = pool.length ? pickWeighted(r, pool.map((e) => [e, e.weight || 1])) : { id: 'quiet_span', text: pick(r, content.fills.quiet_span) };
+      hero.used.add(ev.id);
+      applyFx(ev.fx, hero, content);
+      hero.lastDate = birthAbs + slot.span[slot.span.length - 1] * 12 + 11;
+      const endDate = birthAbs + slot.span[slot.span.length - 1] * 12 + 11;
+      out.push({ clock, label: `${Math.floor(d / 12)}–${Math.floor(endDate / 12)} · ${slot.span[0]}–${ageWord(slot.span[slot.span.length - 1])}`, type: 'span', id: ev.id, text: render(ev.text, hero, content), date: d });
+      continue;
+    }
     if (slot.meeting) {
       hero.lastDate = Math.max(hero.lastDate, slot.date);
       out.push({ clock, label: labelOf(slot.date), type: 'meeting', id: meeting.id, text: render(meeting.text(hero), hero, content), date: slot.date });
@@ -323,10 +475,12 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       const options = fork.options.filter((o) => conditionsMet(o.if, hero, Math.floor(d / 12)));
       const chosenIdx = chooseFork ? chooseFork(fork, options) : Math.floor(r() * options.length);
       const chosen = options[chosenIdx];
+      const forkText = render(fork.text, hero, content);
       applyFx(chosen.fx, hero, content);
+      hero.forkLog.push({ age: ageAt(d), title: fork.title || fork.text, chosen: chosen.label.replace(/^[^А-Яа-яЁёA-Za-z0-9«]+/, ''), big: fork.kind === 'big' || fork.key });
       out.push({
         clock, label: labelOf(d), type: 'fork', id: fork.id,
-        text: render(fork.text, hero, content),
+        text: forkText,
         options: options.map((o) => o.label),
         chosen: chosen.label,
         result: render(chosen.result, hero, content),
@@ -358,15 +512,46 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       ev = { id: key, text: pick(r, content.fills[key]) };
     }
     hero.lastDate = d;
+    const evText = render(ev.text, hero, content); // текст до последствий: супруг ещё жив, бывший ещё не бывший
     applyFx(ev.fx, hero, content);
-    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, text: render(ev.text, hero, content), age: ageAt(d), date: d });
+    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, text: evText, age: ageAt(d), date: d });
   }
   return out;
 }
 
+// Итог жизни: кем был, где жил, семья и главные развилки.
+function finale(hero, content) {
+  const deathYear = Math.floor(hero.deathDate / 12);
+  const cityName = (n) => n[0].toUpperCase() + n.slice(1);
+  const lines = [`${hero.name}, ${hero.birthYear}–${deathYear}. ${hero.cities.map(cityName).join(' → ')}.`];
+  const fam = [];
+  if (hero.spouse && hero.flags.includes('married')) fam.push(`${hero.gender === 'm' ? 'жена' : 'муж'} ${hero.spouse.name}`);
+  else if (hero.spouse) fam.push(`${hero.spouse.name} — ${hero.spouse.gender === 'm' ? 'любимый' : 'любимая'}, без штампа, но на всю жизнь`);
+  else if (hero.flags.includes('widowed') && hero.ex) fam.push(`${hero.gender === 'm' ? 'жена' : 'муж'} ${hero.ex.name}, ушедш${hero.ex.gender === 'm' ? 'ий' : 'ая'} раньше`);
+  if (hero.kids.length) fam.push(`${hero.kids.length === 1 ? (hero.kids[0].gender === 'm' ? 'сын' : 'дочь') : 'дети'} ${hero.kids.map((k) => k.name).join(' и ')}`);
+  if (hero.flags.includes('grandkids')) fam.push('внуки');
+  lines.push(fam.length ? `Семья: ${fam.join(', ')}.` : 'Семьи так и не завёл{|а}, зато друзей было много.');
+  const work = content.fills.final_work?.find((w) => hero.flags.includes(w.flag));
+  if (work) lines.push(work.text);
+  lines.push('', 'Главные развилки:');
+  // Одна развилка — одна строка: если вопрос повторялся, в итог идёт последнее решение.
+  const byTitle = new Map();
+  for (const f of hero.forkLog) byTitle.set(f.title, f);
+  const uniq = [...byTitle.values()];
+  for (const f of uniq.filter((x) => x.big).concat(uniq.filter((x) => !x.big)).slice(0, 10).sort((a, b) => a.age - b.age)) {
+    lines.push(`• ${ageWord(f.age)}: ${f.title.replace(/\{[^}]*\}/g, '').slice(0, 80)} → ${f.chosen}`);
+  }
+  lines.push('', 'Статистика поколения появится, когда наберётся больше прожитых жизней.', '', '🔁 Прожить ещё одну жизнь?');
+  return render(lines.join('\n'), hero, content);
+}
+
 function liveLife(content, { birthYear, seed, chooseFork }) {
   const hero = createHero(content, { birthYear, seed });
-  const days = DAYS.map((plan) => ({ day: plan.day, messages: liveDay(hero, content, plan, { chooseFork }) }));
+  const days = [];
+  for (const plan of DAYS) {
+    days.push({ day: plan.day, messages: liveDay(hero, content, plan, { chooseFork }) });
+    if (hero.dead) break;
+  }
   return { hero, days };
 }
 
@@ -428,8 +613,8 @@ function liveDuo(content, { birthYear, seedA, seedB, sameCityChance = 0.3, choos
     const meeting = plan && { id: plan.scenario.id, date: plan.date, text: () => plan.scenario.text };
     days.push({
       day: dayPlan.day,
-      a: liveDay(a, content, dayPlan, { chooseFork, meeting }),
-      b: liveDay(b, content, dayPlan, { chooseFork, meeting }),
+      a: a.dead ? [] : liveDay(a, content, dayPlan, { chooseFork, meeting }),
+      b: b.dead ? [] : liveDay(b, content, dayPlan, { chooseFork, meeting }),
     });
   }
   return { a, b, plan, days };
