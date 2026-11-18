@@ -22,10 +22,10 @@ for (let p = 0; p < PLAYERS; p++) {
     const y = ANY_YEAR ? 1980 + ((p * 7 + k * 13) % 41) : year;
     const life = liveLife(content, { birthYear: y, seed: 100000 + p * 10 + k, seenBefore: MEMORY ? seen : undefined });
     for (const m of msgs(life)) {
-      if (m.type === 'fork') { forkTotalAt[k]++; if (seenForks.has(m.id)) forkRepeatAt[k]++; }
+      if (m.type === 'fork') { forkTotalAt[k]++; if (seenForks.has(`${m.id}#${m.v || 0}`)) forkRepeatAt[k]++; }
       else { totalAt[k]++; if (seen.has(m.id)) repeatAt[k]++; if (seenTexts.has(`${m.id}#${m.v || 0}`)) textRepeatAt[k]++; }
     }
-    for (const m of msgs(life)) { (m.type === 'fork' ? seenForks : seen).add(m.id); if (m.type !== 'fork') seenTexts.add(`${m.id}#${m.v || 0}`); }
+    for (const m of msgs(life)) { if (m.type === 'fork') seenForks.add(`${m.id}#${m.v || 0}`); else { seen.add(m.id); seenTexts.add(`${m.id}#${m.v || 0}`); } }
   }
 }
 
@@ -65,7 +65,7 @@ for (let i = 0; i < sets.length; i++) {
 
 const pct = (a, b) => `${((100 * a) / b).toFixed(0)}%`;
 console.log(`\n=== 1. Один игрок, 10 жизней подряд (${PLAYERS} игроков)${MEMORY ? ', бот помнит прочитанное' : ''}${ANY_YEAR ? ', каждый раз новый год рождения' : ', год рождения один и тот же'} ===`);
-for (let k = 0; k < 10; k++) console.log(`Жизнь ${k + 1}: тот же текст, что уже читал ${pct(textRepeatAt[k], totalAt[k])} · то же событие другими словами ${pct(repeatAt[k] - textRepeatAt[k], totalAt[k])} · развилки-повторы ${pct(forkRepeatAt[k], forkTotalAt[k])}`);
+for (let k = 0; k < 10; k++) console.log(`Жизнь ${k + 1}: тот же текст, что уже читал ${pct(textRepeatAt[k], totalAt[k])} · то же событие другими словами ${pct(repeatAt[k] - textRepeatAt[k], totalAt[k])} · развилки с тем же текстом ${pct(forkRepeatAt[k], forkTotalAt[k])}`);
 
 console.log(`\n=== 2. Похожесть жизней (${N} жизней) ===`);
 console.log(`Две случайные жизни одного года рождения делят в среднем ${pct(jSum, pairs)} событий, максимум ${pct(jMax, 1)}.`);

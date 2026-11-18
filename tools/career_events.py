@@ -26,12 +26,12 @@ ev('job_company_successor', [18, 75], [
   '{company_old} уходит из России. Вывеску меняют за выходные: теперь это {company}. Коллеги те же, пропуск тот же, только логотип непривычный.',
   'Письмо от руководства: {company_old} продаёт бизнес. Через месяц {name} работает уже в компании под названием {company}. Кофемашина, к счастью, осталась.',
   'На общем собрании объявили: {company_old} больше не работает в России. Новое название — {company}. Неделю все путаются, потом привыкают.'],
-  {'company': 'successor'}, {'company': 'left', 'happy': -1}, 'm', must=True, render_after=True)
+  {'company': 'successor'}, {'company': 'left', 'happy': -1}, 'm', must=True, render_after=True, months=[3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 ev('job_company_closed', [18, 75], [
   '{company_old} закрывает офис в России. Прощальная пицца, пустые столы. Через два месяца {name} — {job} {at_company}.',
   'Новость пришла утром: {company_old} уходит. Выходное пособие, коробка с вещами — и через пару месяцев новое место: {at_company}.',
   '{company_old} сворачивается. {name} полтора месяца ходит по собеседованиям и в итоге выходит {at_company}.'],
-  {'company': 'closed'}, {'company': 'left', 'happy': -3, 'money': -2}, 'm', must=True, render_after=True)
+  {'company': 'closed'}, {'company': 'left', 'happy': -3, 'money': -2}, 'm', must=True, render_after=True, months=[3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 ev('job_company_renamed', [18, 75], [
   'Ребрендинг: {company_old} теперь называется {company}. Новые бейджи, новые кружки, {name} по привычке говорит по-старому.',
   'Компания сменила название — теперь это {company}. {name} ещё год представляется по-старому, и все понимают.'],

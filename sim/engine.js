@@ -156,7 +156,7 @@ function companyOk(c, hero, year) {
   return true;
 }
 function pickCompany(content, hero, field, year) {
-  if (hero.city.type === 'abroad') return pick(hero.r, content.careers.abroad);
+  if (hero.city.type === 'abroad' && field !== content.careers.fields.business) return pick(hero.r, content.careers.abroad);
   const list = field.companies.filter((c) => companyOk(c, hero, year));
   if (!list.length) return { n: 'местная компания', at: 'в местной компании' };
   // Компания из своего города (завод в Тольятти) — в разы вероятнее общей.
