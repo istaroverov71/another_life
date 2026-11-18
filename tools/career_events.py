@@ -66,7 +66,7 @@ ev('job_burnout', [28, 50], [
   'Выгорание. {name} приходит на работу и полчаса просто смотрит в экран. Отпуск за свой счёт, море, телефон в тумбочке.',
   'Однажды утром {name} не смог{|ла} встать на работу. Не заболел{|а} — просто не смог{|ла}. Две недели отпуска и долгие разговоры с психологом.'],
   {'flags': ['employed'], 'job_years': 4, **NB}, {'health': -3, 'happy': -4}, 'm')
-ev('job_layoff', [25, 58], [
+ev('job_layoff', [25, 40], [
   'Сокращение. Отдел расформировали за одну планёрку. {name} две недели не говорит родителям, а потом находит новое место, даже лучше.',
   'Компания режет расходы. {name} попал{|а} в список. Три месяца поисков — и новая работа: {job} {at_company}.'],
   {'flags': ['employed'], 'job_years': 2, **NB}, {'job': 'same', 'money': -4, 'happy': -2}, 'm', render_after=True)
@@ -303,7 +303,14 @@ for field, items in P.items():
         cond = F(field, {**extra})
         if field != 'business': cond['not'] = ['retired']
         ev(id, age, texts, cond, fx or None, 'any')
-# be_own только для женщин: тексты про «наняла»
+# Эти события уже были в adult.json — их тексты уходят туда вариантами, а сами события не дублируем.
+MERGE = {'job_burnout': 'ad_burnout', 'job_corporate': 'ad_corporate', 'job_promotion': 'ad_promotion_mid', 'it_first_bug': 'ad_it_first', 'job_mentor': 'mi_mentor'}
+merged = {MERGE[e['id']]: e['texts'] for e in E if e['id'] in MERGE}
+E = [e for e in E if e['id'] not in MERGE]
+for e in E:
+    if e['id'] == 'job_first_salary': e['if']['not'] = e['if']['not'] + ['college']
+json.dump({'_about': 'Тексты из career.json, которые стали вариантами старых событий взрослой жизни.', 'texts': merged},
+          open(os.path.join(ROOT, 'content/variants/career_merge.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
 json.dump({'_about': 'Работа и карьера: у каждой профессии своя линия, плюс общие события (повышение, выгорание, корпоратив, уход компаний в 2022-м). Собирается скриптом tools/career_events.py.',
            'events': E}, open(os.path.join(ROOT, 'content/events/career.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
 print('событий:', len(E), 'текстов:', sum(len(e['texts']) for e in E))

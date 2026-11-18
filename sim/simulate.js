@@ -79,9 +79,9 @@ function check(content, runs) {
   const ids = new Set();
   let quiet = 0;
   // Запретные слова и темы (см. research/russia.md, раздел «Политика и религия»).
-  const FORBIDDEN = /войн|путин|сво\b|мобилиз|санкци|президент|депутат|митинг|протест|выборы|крым|донбасс|украин/i;
+  const FORBIDDEN = /(?<!д)войн|путин|сво\b|мобилиз|санкци|президент|депутат|митинг|протест|выборы|крым|донбасс|украин/i;
   for (const e of [...content.events, ...content.forks, ...content.meetings]) {
-    const texts = [e.text, ...(e.options || []).flatMap((o) => [o.label, o.result])];
+    const texts = [...(e.texts || [e.text]), ...(e.options || []).flatMap((o) => [o.label, ...(o.results || [o.result])])];
     for (const t of texts) if (FORBIDDEN.test(t)) problems.push(`Запретная тема в ${e.id}: ${t}`);
     // Имя всегда в именительном падеже: после предлогов и в конструкциях вроде «ему достаётся» его ставить нельзя.
     for (const t of texts) if (t && /(^|[\s«(])(у|к|с|со|для|без|от|о|об|про|за|при|по|перед|над|под) \{name\}|\{name\} (достаётся|кажется|нравится|хочется|повезло)|(отдать|отдавать|позвать|поздравить|увидеть|любить|назвать|взять|забрать|отвести) \{name\}/i.test(t)) problems.push(`Имя не в именительном падеже в ${e.id}: ${t}`);
