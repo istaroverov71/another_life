@@ -1,12 +1,8 @@
 // Проверка контента эмиграции: герой переезжает в каждый из городов и живёт там шесть лет.
 // Запуск: node sim/test_abroad.js
-const fs = require('fs');
 const { createHero, liveDay } = require('./engine');
-const R = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
-const dir = (d) => fs.readdirSync(`content/${d}`).filter((f) => f.endsWith('.json')).map((f) => R(`content/${d}/${f}`));
-const c = { regions: R('content/world/regions.json').regions, names: R('content/world/names.json'), start: R('content/world/start.json'), events: [], forks: [], fills: {} };
-for (const f of dir('events')) { c.events.push(...f.events); Object.assign(c.fills, f.fills || {}); }
-for (const f of dir('forks')) c.forks.push(...f.forks);
+const { loadContent } = require('./simulate');
+const c = loadContent();
 let bad = 0;
 for (const [i, city] of ['Ереван', 'Тбилиси', 'Алматы', 'Белград', 'Стамбул'].entries()) {
   const h = createHero(c, { birthYear: 1997, seed: 11 + i });
