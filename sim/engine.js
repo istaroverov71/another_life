@@ -58,7 +58,7 @@ function pickPool(r, region) {
 function pickName(r, content, pool, gender, birthYear, avoid = []) {
   let entries;
   if (pool === 'ru') {
-    const y = String(Math.min(2012, Math.max(1980, birthYear)));
+    const y = String(Math.min(2020, Math.max(1980, birthYear)));
     entries = Object.entries(content.names.ru[y][gender]);
   } else {
     const period = birthYear < 2000 ? 'old' : 'new';
@@ -121,12 +121,76 @@ function createHero(content, { birthYear, seed, place }) {
     dadDue: 44 + Math.floor(r() * 16),
     momDue: 50 + Math.floor(r() * 16),
     kids: [],
+    jobs: [],
+    job: null,
     forkLog: [],
     cities: [city.name],
     flags: [],
     used: new Set(),
     r,
   };
+}
+
+
+// ---------- Работа ----------
+// Профессии и компании — content/world/careers.json. Компания выбирается по году и городу:
+// иностранные — только пока они работали в России, после ухода их место занимают преемники.
+function fieldWeight(field, year) {
+  let w = field.w;
+  for (const [y, k] of field.by_year || []) if (year >= y) w = k;
+  return w;
+}
+function companyAt(job, year) {
+  const c = job.company;
+  let cur = { n: c.n, at: c.at };
+  for (const r of c.renamed || []) if (year >= r.year) cur = { n: r.n, at: r.at };
+  return cur;
+}
+function companyOk(c, hero, year) {
+  if (year < (c.from || 0) || year > (c.left ? c.left - 1 : c.to || 9999)) return false;
+  const t = hero.city.type;
+  if (c.cities && !c.cities.includes(hero.city.name)) return false;
+  if (c.big && !['capital', 'million', 'large'].includes(t)) return false;
+  if (c.capital && t !== 'capital') return false;
+  if (c.small && !['small', 'village', 'medium'].includes(t)) return false;
+  return true;
+}
+function pickCompany(content, hero, field, year) {
+  if (hero.city.type === 'abroad') return pick(hero.r, content.careers.abroad);
+  const list = field.companies.filter((c) => companyOk(c, hero, year));
+  if (!list.length) return { n: 'местная компания', at: 'в местной компании' };
+  // Компания из своего города (завод в Тольятти) — в разы вероятнее общей.
+  return pickWeighted(hero.r, list.map((c) => [c, (c.w || 1) * (c.cities ? 6 : 1)]));
+}
+function setJob(content, hero, spec, year) {
+  const C = content.careers;
+  let id = spec;
+  if (Array.isArray(spec)) id = pickWeighted(hero.r, spec.map((f) => [f, fieldWeight(C.fields[f], year)]));
+  if (spec === 'auto') {
+    const edu = hero.flags.includes('uni') ? 'uni' : hero.flags.includes('college') ? 'college' : 'none';
+    const options = Object.entries(C.fields).filter(([, f]) => f.edu.includes(edu) && f.auto !== false && (!f.place || f.place.includes(hero.city.type)));
+    id = pickWeighted(hero.r, options.map(([k, f]) => [k, fieldWeight(f, year)]));
+  }
+  if (spec === 'same' && hero.job) id = hero.job.field;
+  const field = C.fields[id];
+  const prev = hero.job;
+  if (prev) {
+    const pf = C.fields[prev.field];
+    hero.flags = hero.flags.filter((x) => x !== `job_${prev.field}` && !(pf.flags || []).includes(x));
+    hero.jobs[hero.jobs.length - 1].to = year;
+  }
+  hero.job = { field: id, title: pick(hero.r, field.titles), company: pickCompany(content, hero, field, year), since: year };
+  hero.jobs.push({ field: id, title: hero.job.title, company: hero.job.company, from: year });
+  for (const f of [`job_${id}`, 'employed', ...(field.flags || [])]) if (!hero.flags.includes(f)) hero.flags.push(f);
+}
+// Компания ушла из России (или переименовалась) уже после того, как герой туда устроился.
+function companyEvent(hero, year) {
+  const j = hero.job;
+  if (!j || hero.city.type === 'abroad') return null;
+  const c = j.company;
+  if (c.left && year >= c.left && j.since < c.left && !j.leftSeen) return c.successor ? 'successor' : 'closed';
+  for (const r of c.renamed || []) if (year >= r.year && j.since < r.year && (j.renameSeen || 0) < r.year) return 'renamed';
+  return null;
 }
 
 function deathAge(r, region, gender) {
@@ -166,6 +230,11 @@ function render(text, hero, content) {
     .replace(/\{ex\}/g, hero.ex?.name ?? '')
     .replace(/\{kid1\}/g, hero.kids[0]?.name ?? '')
     .replace(/\{kid2\}/g, hero.kids[1]?.name ?? '')
+    .replace(/\{job\}/g, () => (hero.job ? (hero.job.title.includes('|') ? forms(hero.job.title, g) : hero.job.title) : ''))
+    .replace(/\{at_company\}/g, () => (hero.job ? companyAt(hero.job, hero.nowYear).at : ''))
+    .replace(/\{company\}/g, () => (hero.job ? companyAt(hero.job, hero.nowYear).n : ''))
+    .replace(/\{at_company_old\}/g, () => (hero.job?.old ? hero.job.old.at : ''))
+    .replace(/\{company_old\}/g, () => (hero.job?.old ? hero.job.old.n : ''))
     .replace(/\{in\}/g, hero.city.in)
     .replace(/\{to\}/g, hero.city.to || hero.city.in)
     .replace(/\{city\}/g, hero.city.name)
@@ -179,28 +248,59 @@ function render(text, hero, content) {
 }
 
 // Текст упоминает супруга, ребёнка, брата и т. д. — значит, этот человек должен существовать.
+// У события может быть несколько вариантов текста (texts): подходит то, где хотя бы один вариант
+// говорит только о тех, кто у героя есть.
+const NEEDS_STR = new Map();
+function needsOfStr(t) {
+  let n = NEEDS_STR.get(t);
+  if (!n) {
+    n = {
+      spouse: /\{(spouse|sp:)/.test(t), ex: /\{(ex\}|ex:)/.test(t), sib: /\{(sib\}|s:)/.test(t),
+      kids: /\{(kid2|k2:)/.test(t) ? 2 : /\{(kid1|k1:)/.test(t) ? 1 : 0,
+      job: /\{(job|at_company|company)/.test(t),
+    };
+    NEEDS_STR.set(t, n);
+  }
+  return n;
+}
 const NEEDS = new WeakMap();
 function needsOf(obj) {
   let n = NEEDS.get(obj);
   if (!n) {
-    const t = JSON.stringify([obj.text, obj.options]);
-    const makesChild = /"child":true/.test(JSON.stringify(obj.options || []));
-    const makesSpouse = /"spouse":"new"/.test(JSON.stringify(obj.options || []));
-    n = {
-      spouse: /\{(spouse|sp:)/.test(JSON.stringify([obj.text])) || (!makesSpouse && /\{(spouse|sp:)/.test(t)), ex: /\{(ex\}|ex:)/.test(t), sib: /\{(sib\}|s:)/.test(t),
-      kids: /\{(kid2|k2:)/.test(t) ? (makesChild ? 1 : 2) : /\{(kid1|k1:)/.test(t) ? (makesChild ? 0 : 1) : 0,
-    };
+    const opts = JSON.stringify(obj.options || []);
+    const makesChild = /"child":true/.test(opts);
+    const makesSpouse = /"spouse":"new"/.test(opts);
+    const makesJob = /"job":/.test(opts);
+    const o = needsOfStr(opts);
+    n = { spouse: !makesSpouse && o.spouse, ex: o.ex, sib: o.sib, kids: makesChild ? Math.max(0, o.kids - 1) : o.kids, job: !makesJob && o.job, makesChild, makesJob };
     NEEDS.set(obj, n);
   }
   return n;
 }
-function peopleOk(obj, hero) {
-  const n = needsOf(obj);
+function meets(n, hero, kidsBonus = 0, jobBonus = false) {
   if (n.spouse && !hero.spouse) return false;
   if (n.ex && !hero.ex) return false;
   if (n.sib && !hero.sibling) return false;
-  if (hero.kids.length < n.kids) return false;
-  return true;
+  if (n.job && !hero.job && !jobBonus) return false;
+  return hero.kids.length + kidsBonus >= n.kids;
+}
+const textsOf = (obj) => obj.texts || [obj.text];
+// Варианты текста, подходящие герою прямо сейчас.
+function okTexts(obj, hero) {
+  const bonus = obj.options && needsOf(obj).makesChild ? 1 : 0;
+  const jobBonus = !!(obj.fx && obj.fx.job) || !!(obj.options && needsOf(obj).makesJob);
+  return textsOf(obj).filter((t) => meets(needsOfStr(t), hero, bonus, jobBonus));
+}
+function peopleOk(obj, hero) {
+  if (obj.options && !meets(needsOf(obj), hero)) return false;
+  return okTexts(obj, hero).length > 0;
+}
+// Выбор варианта: случайный из подходящих. Возвращает текст и его номер.
+function pickText(obj, hero) {
+  const all = textsOf(obj);
+  const ok = okTexts(obj, hero);
+  const t = ok.length ? pick(hero.r, ok) : all[0];
+  return { text: t, v: all.indexOf(t) };
 }
 
 function conditionsMet(cond, hero, year, obj) {
@@ -223,6 +323,10 @@ function conditionsMet(cond, hero, year, obj) {
   if (cond.money_min !== undefined && hero.stats.money < cond.money_min) return false;
   if (cond.any && !cond.any.some((f) => hero.flags.includes(f))) return false;
   if (cond.min_years_abroad && (hero.abroadSince === undefined || year - Math.floor(hero.abroadSince / 12) < cond.min_years_abroad)) return false;
+  if (cond.company && companyEvent(hero, year) !== cond.company) return false;
+  if (cond.field && (!hero.job || !cond.field.includes(hero.job.field))) return false;
+  if (cond.not_field && hero.job && cond.not_field.includes(hero.job.field)) return false;
+  if (cond.job_years && (!hero.job || year - hero.job.since < cond.job_years)) return false;
   if (cond.wealth && !cond.wealth.includes(hero.wealth)) return false;
   if (cond.parents && cond.parents !== hero.parents) return false;
   if (cond.sib && !cond.sib.includes(hero.sib)) return false;
@@ -242,6 +346,7 @@ function applyFx(fx, hero, content) {
   for (const f of fx.unflags || []) hero.flags = hero.flags.filter((x) => x !== f);
   const year = Math.floor((hero.lastDate ?? 0) / 12);
   const age = year - hero.birthYear;
+  if (hero.flags.includes('retired') && !hero.retiredYear) hero.retiredYear = year;
   if (fx.spouse === 'new') {
     const g = hero.gender === 'm' ? 'f' : 'm';
     hero.spouse = newPerson(hero.r, content, hero, g, hero.birthYear + Math.floor(hero.r() * 5) - 2);
@@ -253,7 +358,7 @@ function applyFx(fx, hero, content) {
   }
   if (fx.child) {
     const g = hero.r() < 0.514 ? 'm' : 'f';
-    const kid = { gender: g, birthYear: year, name: pickName(hero.r, content, hero.familyPool, g, Math.min(2012, year), hero.kids.map((k) => k.name).concat([hero.name])) };
+    const kid = { gender: g, birthYear: year, name: pickName(hero.r, content, hero.familyPool, g, Math.min(2020, year), hero.kids.map((k) => k.name).concat([hero.name])) };
     hero.kids.push(kid);
     if (!hero.flags.includes('has_kids')) hero.flags.push('has_kids');
   }
@@ -269,6 +374,18 @@ function applyFx(fx, hero, content) {
     hero.flags.push('widowed');
   }
   void age;
+  if (fx.company) {
+    const j = hero.job; const c = j.company;
+    if (fx.company === 'renamed') {
+      let before = { n: c.n, at: c.at };
+      for (const r of c.renamed) { if (r.year > year) break; if (r.year > (j.renameSeen || 0) && r.year <= year) { j.old = before; } before = { n: r.n, at: r.at }; }
+      j.renameSeen = year;
+    } else {
+      const old = companyAt(j, year);
+      if (c.successor) { j.company = { ...c.successor }; hero.jobs[hero.jobs.length - 1].company = j.company; j.old = old; j.leftSeen = true; } else { setJob(content, hero, 'same', year); hero.job.old = old; hero.job.leftSeen = true; }
+    }
+  }
+  if (fx.quit_job && hero.job) { hero.jobs[hero.jobs.length - 1].to = year; hero.flags = hero.flags.filter((x) => x !== `job_${hero.job.field}` && x !== 'employed'); hero.job = null; }
   if (fx.move) {
     const all = content.regions.flatMap((g) => g.cities.map((c) => ({ ...c, region: g.id })));
     if (fx.move === 'big') {
@@ -295,7 +412,10 @@ function applyFx(fx, hero, content) {
       hero.city = all.find((c) => c.type === 'capital' && c.name !== hero.city.name);
     }
     if (hero.cities[hero.cities.length - 1] !== hero.city.name) hero.cities.push(hero.city.name);
+    // Переезд — новое место работы в той же профессии (своё дело переезжает вместе с хозяином).
+    if (hero.job && hero.job.field !== 'business' && !fx.job) setJob(content, hero, 'same', year);
   }
+  if (fx.job) setJob(content, hero, fx.job, year);
 }
 
 function dateLabel(hero, ageFloat) {
@@ -441,7 +561,9 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       hero.lastDate = d;
       const pool = content.deaths.filter((e) => conditionsMet(e.if, hero, Math.floor(d / 12), e) && ageAt(d) >= (e.age || [0])[0] && ageAt(d) <= (e.age || [0, 200])[1]);
       const ev = pickWeighted(r, pool.map((e) => [e, e.weight || 1]));
-      out.push({ clock, label: labelOf(d), type: 'death', id: ev.id, text: render(ev.text, hero, content).replace('{age}', ageWord(ageAt(d))), date: d });
+      hero.nowYear = Math.floor(d / 12);
+      const dt = pickText(ev, hero);
+      out.push({ clock, label: labelOf(d), type: 'death', id: ev.id, v: dt.v, text: render(dt.text, hero, content).replace('{age}', ageWord(ageAt(d))), date: d });
       hero.dead = true; hero.deathDate = d;
       out.push({ clock: '20:00', label: 'Итог жизни', type: 'final', text: finale(hero, content) });
       break;
@@ -455,7 +577,9 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       applyFx(ev.fx, hero, content);
       hero.lastDate = birthAbs + slot.span[slot.span.length - 1] * 12 + 11;
       const endDate = birthAbs + slot.span[slot.span.length - 1] * 12 + 11;
-      out.push({ clock, label: `${Math.floor(d / 12)}–${Math.floor(endDate / 12)} · ${slot.span[0]}–${ageWord(slot.span[slot.span.length - 1])}`, type: 'span', id: ev.id, text: render(ev.text, hero, content), date: d });
+      hero.nowYear = Math.floor(d / 12);
+      const sp = ev.texts ? pickText(ev, hero) : { text: ev.text, v: 0 };
+      out.push({ clock, label: `${Math.floor(d / 12)}–${Math.floor(endDate / 12)} · ${slot.span[0]}–${ageWord(slot.span[slot.span.length - 1])}`, type: 'span', id: ev.id, v: sp.v, text: render(sp.text, hero, content), date: d });
       continue;
     }
     if (slot.meeting) {
@@ -472,18 +596,33 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
     if (slot.fork) {
       const d = Math.max(slot.date, hero.lastDate);
       hero.lastDate = d;
-      const options = fork.options.filter((o) => conditionsMet(o.if, hero, Math.floor(d / 12)));
+      hero.nowYear = Math.floor(d / 12);
+      let options = fork.options.filter((o) => conditionsMet(o.if, hero, Math.floor(d / 12)));
+      // Развилка с большим списком (например, выбор профессии) показывает только pick вариантов:
+      // каждый раз разные, с учётом того, насколько профессия распространена в этот год.
+      if (fork.pick && options.length > fork.pick) {
+        const keep = options.filter((o) => o.always);
+        const pool = options.filter((o) => !o.always).map((o) => [o, o.weight || (o.fx && typeof o.fx.job === 'string' && content.careers.fields[o.fx.job] ? fieldWeight(content.careers.fields[o.fx.job], hero.nowYear) : 1)]);
+        const chosenOpts = [];
+        while (chosenOpts.length < fork.pick - keep.length && pool.length) {
+          const o = pickWeighted(r, pool); chosenOpts.push(o); pool.splice(pool.findIndex(([x]) => x === o), 1);
+        }
+        options = fork.options.filter((o) => chosenOpts.includes(o) || keep.includes(o));
+      }
       const chosenIdx = chooseFork ? chooseFork(fork, options) : Math.floor(r() * options.length);
       const chosen = options[chosenIdx];
-      const forkText = render(fork.text, hero, content);
+      const ft = pickText(fork, hero);
+      const forkText = render(ft.text, hero, content);
       applyFx(chosen.fx, hero, content);
+      const res = chosen.results ? pick(r, chosen.results) : chosen.result;
       hero.forkLog.push({ age: ageAt(d), title: fork.title || fork.text, chosen: chosen.label.replace(/^[^А-Яа-яЁёA-Za-z0-9«]+/, ''), big: fork.kind === 'big' || fork.key });
       out.push({
         clock, label: labelOf(d), type: 'fork', id: fork.id,
         text: forkText,
         options: options.map((o) => o.label),
         chosen: chosen.label,
-        result: render(chosen.result, hero, content),
+        v: ft.v,
+        result: render(res, hero, content),
       });
       continue;
     }
@@ -513,9 +652,15 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       ev = { id: key, text: pick(r, content.fills[key]) };
     }
     hero.lastDate = d;
-    const evText = render(ev.text, hero, content); // текст до последствий: супруг ещё жив, бывший ещё не бывший
-    applyFx(ev.fx, hero, content);
-    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, text: evText, age: ageAt(d), date: d });
+    hero.nowYear = Math.floor(d / 12);
+    // Текст до последствий: супруг ещё жив, бывший ещё не бывший. Кроме событий про смену
+    // работы (render_after): там текст говорит уже о новом месте.
+    let evText; let v = 0;
+    if (ev.render_after) { applyFx(ev.fx, hero, content); ({ text: evText, v } = pickText(ev, hero)); evText = render(evText, hero, content); } else {
+      ({ text: evText, v } = pickText(ev, hero)); evText = render(evText, hero, content);
+      applyFx(ev.fx, hero, content);
+    }
+    out.push({ clock, label: labelOf(d), type: 'event', id: ev.id, v, text: evText, age: ageAt(d), date: d });
   }
   return out;
 }
@@ -532,6 +677,15 @@ function finale(hero, content) {
   if (hero.kids.length) fam.push(`${hero.kids.length === 1 ? (hero.kids[0].gender === 'm' ? 'сын' : 'дочь') : 'дети'} ${hero.kids.map((k) => k.name).join(' и ')}`);
   if (hero.flags.includes('grandkids')) fam.push('внуки');
   lines.push(fam.length ? `Семья: ${fam.join(', ')}.` : 'Семьи так и не завёл{|а}, зато друзей было много.');
+  // Дело жизни: работа, где герой провёл больше всего лет.
+  const yearsWord = (n) => ageWord(n).replace('год', 'год').replace(/^(\d+) /, '$1 ');
+  const jobs = hero.jobs.map((j) => ({ ...j, len: (j.to ?? Math.min(deathYear, hero.retiredYear ?? deathYear)) - j.from }));
+  const main = jobs.sort((x, y) => y.len - x.len)[0];
+  if (main && main.len >= 2) {
+    const at = companyAt({ company: main.company }, main.to ?? deathYear).at;
+    const t = main.title.includes('|') ? main.title.split('|')[hero.gender === 'm' ? 0 : 1] : main.title;
+    lines.push(`Дольше всего — ${t} ${at}: ${yearsWord(main.len)}.${hero.jobs.length > 2 ? ` Всего мест работы: ${hero.jobs.length}.` : ''}`);
+  }
   const work = content.fills.final_work?.find((w) => hero.flags.includes(w.flag));
   if (work) lines.push(work.text);
   lines.push('', 'Главные развилки:');

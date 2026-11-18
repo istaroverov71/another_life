@@ -16,10 +16,10 @@ const ANY_YEAR = process.argv.includes('--any-year'); // игрок каждый
 const repeatAt = Array(10).fill(0); const totalAt = Array(10).fill(0);
 const forkRepeatAt = Array(10).fill(0); const forkTotalAt = Array(10).fill(0);
 for (let p = 0; p < PLAYERS; p++) {
-  const year = 1980 + (p % 33);
+  const year = 1980 + (p % 41);
   const seen = new Set(); const seenForks = new Set();
   for (let k = 0; k < 10; k++) {
-    const y = ANY_YEAR ? 1980 + ((p * 7 + k * 13) % 33) : year;
+    const y = ANY_YEAR ? 1980 + ((p * 7 + k * 13) % 41) : year;
     const life = liveLife(content, { birthYear: y, seed: 100000 + p * 10 + k, seenBefore: MEMORY ? seen : undefined });
     for (const m of msgs(life)) {
       if (m.type === 'fork') { forkTotalAt[k]++; if (seenForks.has(m.id)) forkRepeatAt[k]++; }
@@ -33,7 +33,7 @@ for (let p = 0; p < PLAYERS; p++) {
 const sig = {}; const freq = {}; const sets = [];
 const deathBucket = (a) => (a < 50 ? 'до 50' : a < 65 ? '50–64' : a < 80 ? '65–79' : '80+');
 for (let i = 0; i < N; i++) {
-  const life = liveLife(content, { birthYear: 1980 + (i % 33), seed: 500000 + i });
+  const life = liveLife(content, { birthYear: 1980 + (i % 41), seed: 500000 + i });
   const h = life.hero;
   const f = (x) => h.flags.includes(x);
   const age = Math.floor((h.deathDate - (h.birthYear * 12 + h.birthMonth)) / 12);
@@ -55,7 +55,7 @@ for (let i = 0; i < N; i++) {
 // Похожесть двух случайных жизней одного года рождения: доля общих событий (Жаккар).
 let jSum = 0; let jMax = 0; let pairs = 0;
 for (let i = 0; i < sets.length; i++) {
-  for (let j = i + 33; j < sets.length; j += 33) { // тот же год рождения
+  for (let j = i + 41; j < sets.length; j += 41) { // тот же год рождения
     const a = sets[i]; const b = sets[j];
     let inter = 0; for (const x of a) if (b.has(x)) inter++;
     const jac = inter / (a.size + b.size - inter);

@@ -16,13 +16,32 @@ function loadContent() {
   const events = []; const forks = []; const fills = {};
   for (const file of dir('events')) { events.push(...file.events); Object.assign(fills, file.fills || {}); }
   for (const file of dir('forks')) { forks.push(...file.forks); Object.assign(fills, file.fills || {}); }
+  const deaths = readJson(path.join(ROOT, 'content/endings/deaths.json')).deaths;
+  // Варианты текстов (content/variants): дополнительные формулировки к событиям, развилкам и итогам развилок.
+  // texts — все варианты события, первый — исходный text.
+  const byId = new Map([...events, ...forks, ...deaths].map((e) => [e.id, e]));
+  for (const file of dir('variants')) {
+    for (const [id, list] of Object.entries(file.texts || {})) {
+      const e = byId.get(id);
+      if (!e) throw new Error(`Варианты для неизвестного события: ${id}`);
+      e.texts = [...(e.texts || [e.text]), ...list];
+    }
+    for (const [key, list] of Object.entries(file.results || {})) {
+      const [id, idx] = key.split('#');
+      const o = byId.get(id)?.options?.[Number(idx)];
+      if (!o) throw new Error(`Варианты для неизвестного итога развилки: ${key}`);
+      o.results = [...(o.results || [o.result]), ...list];
+    }
+    for (const [k, list] of Object.entries(file.fills || {})) fills[k] = [...(fills[k] || []), ...list];
+  }
   return {
     regions: readJson(path.join(ROOT, 'content/world/regions.json')).regions,
     names: readJson(path.join(ROOT, 'content/world/names.json')),
     start: readJson(path.join(ROOT, 'content/world/start.json')),
     events, forks, fills,
     meetings: readJson(path.join(ROOT, 'content/duo/meetings.json')).meetings,
-    deaths: readJson(path.join(ROOT, 'content/endings/deaths.json')).deaths,
+    deaths,
+    careers: readJson(path.join(ROOT, 'content/world/careers.json')),
   };
 }
 
@@ -75,7 +94,7 @@ function check(content, runs) {
     ids.add(e.id);
   }
   for (let i = 0; i < runs; i++) {
-    const year = 1980 + (i % 33);
+    const year = 1980 + (i % 41);
     const life = liveLife(content, { birthYear: year, seed: i + 1 });
     let last = null;
     for (const d of life.days) {
@@ -117,7 +136,7 @@ function check(content, runs) {
   // Проверка распределений: пол, регионы, имена.
   const g = { m: 0, f: 0 }; const reg = {}; const nm = {}; const pools = {};
   for (let i = 0; i < runs; i++) {
-    const h = liveLife(content, { birthYear: 1980 + (i % 33), seed: 100000 + i }).hero;
+    const h = liveLife(content, { birthYear: 1980 + (i % 41), seed: 100000 + i }).hero;
     g[h.gender]++; reg[h.region.id] = (reg[h.region.id] || 0) + 1; nm[h.name] = (nm[h.name] || 0) + 1;
     pools[h.familyPool] = (pools[h.familyPool] || 0) + 1;
   }

@@ -10,7 +10,7 @@ const maxWritten = Math.max(...DAYS.map((d) => d.ages[1]));
 let noPlan = 0; let late = 0; let diffDay = 0; let childhood = 0; let shown = 0; let badShown = 0; let sameCity = 0;
 const ages = {};
 for (let i = 0; i < N; i++) {
-  const year = 1980 + (i % 33);
+  const year = 1980 + (i % 41);
   const duo = liveDuo(content, { birthYear: year, seedA: 2 * i + 1, seedB: 2 * i + 2 });
   const { a, b, plan } = duo;
   if (a.birthCity.name === b.birthCity.name) sameCity++;

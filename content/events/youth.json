@@ -272,8 +272,7 @@
       },
       "fx": {
         "flags": [
-          "graduated",
-          "worker"
+          "graduated"
         ]
       }
     },
@@ -527,22 +526,31 @@
         22
       ],
       "time": "m",
-      "text": "Устроился на работу через знакомого: {worker_job}. Встаёт в шесть, приходит уставший, но деньги свои.",
+      "text": "Устроился через знакомого: {job} {at_company}. Встаёт в шесть, приходит уставший, но деньги свои.",
       "if": {
         "flags": [
           "after_army"
         ],
         "not": [
           "uni",
-          "college"
+          "college",
+          "employed"
         ]
       },
       "fx": {
-        "flags": [
-          "worker"
+        "job": [
+          "factory",
+          "transport",
+          "construction",
+          "shop"
         ],
         "money": 4
-      }
+      },
+      "render_after": true,
+      "texts": [
+        "Устроился через знакомого: {job} {at_company}. Встаёт в шесть, приходит уставший, но деньги свои.",
+        "Дядя замолвил словечко, и вот {name} — {job} {at_company}. Работа как работа, но первую зарплату {name} пересчитал дважды."
+      ]
     },
     {
       "id": "yo_gym",
