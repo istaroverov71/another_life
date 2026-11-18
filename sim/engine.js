@@ -503,7 +503,8 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       // Обязательные события (рождение брата, первый класс) ставим первыми, запасные — в последнюю очередь.
       const must = pool.filter(([e]) => e.must);
       const use = must.length ? [must[0]] : pool;
-      [ev, d] = pickWeighted(r, use.map((p) => [p, (p[0].weight || (p[0].filler ? 0.7 : 1)) * timeFactor(p[0])]));
+      const fresh = (e) => (hero.seenBefore && hero.seenBefore.has(e.id) ? 0.12 : 1);
+      [ev, d] = pickWeighted(r, use.map((p) => [p, (p[0].weight || (p[0].filler ? 0.7 : 1)) * timeFactor(p[0]) * fresh(p[0])]));
       hero.used.add(ev.id);
     } else {
       // Подстраховка: год не должен пропадать, даже если подходящих событий не осталось.
@@ -545,8 +546,10 @@ function finale(hero, content) {
   return render(lines.join('\n'), hero, content);
 }
 
-function liveLife(content, { birthYear, seed, chooseFork }) {
+// seenBefore — события, которые игрок уже читал в прошлых жизнях: они выпадают в разы реже.
+function liveLife(content, { birthYear, seed, chooseFork, seenBefore }) {
   const hero = createHero(content, { birthYear, seed });
+  hero.seenBefore = seenBefore || null;
   const days = [];
   for (const plan of DAYS) {
     days.push({ day: plan.day, messages: liveDay(hero, content, plan, { chooseFork }) });
