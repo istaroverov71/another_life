@@ -1,4 +1,215 @@
 {
+ "specs": {
+  "it": {
+   "label": "💻 Программирование",
+   "name": "программирование",
+   "uni": [
+    "it"
+   ],
+   "college": [
+    "it",
+    "telecom"
+   ],
+   "w": 0.5,
+   "by_year": [
+    [
+     1995,
+     1.2
+    ],
+    [
+     2005,
+     2
+    ],
+    [
+     2012,
+     3
+    ],
+    [
+     2020,
+     4
+    ]
+   ]
+  },
+  "econ": {
+   "label": "📊 Экономика и финансы",
+   "name": "экономику",
+   "uni": [
+    "bank",
+    "accounting",
+    "audit",
+    "marketing"
+   ],
+   "college": [
+    "accounting",
+    "bank",
+    "shop"
+   ],
+   "w": 2,
+   "by_year": [
+    [
+     1995,
+     5
+    ],
+    [
+     2012,
+     3
+    ]
+   ]
+  },
+  "law": {
+   "label": "⚖️ Юриспруденция",
+   "name": "юридический",
+   "uni": [
+    "law",
+    "state"
+   ],
+   "college": [
+    "state",
+    "law"
+   ],
+   "w": 1.5,
+   "by_year": [
+    [
+     1995,
+     4
+    ],
+    [
+     2012,
+     2.5
+    ]
+   ]
+  },
+  "med": {
+   "label": "🩺 Медицина",
+   "name": "медицину",
+   "uni": [
+    "doctor"
+   ],
+   "college": [
+    "nurse"
+   ],
+   "w": 2.5
+  },
+  "ped": {
+   "label": "📚 Педагогика",
+   "name": "педагогику",
+   "uni": [
+    "teacher"
+   ],
+   "college": [
+    "teacher"
+   ],
+   "w": 2.5
+  },
+  "eng": {
+   "label": "⚙️ Инженерия",
+   "name": "инженерное направление",
+   "uni": [
+    "engineer",
+    "oil"
+   ],
+   "college": [
+    "factory",
+    "oil"
+   ],
+   "w": 3.5,
+   "by_year": [
+    [
+     2000,
+     2.5
+    ]
+   ]
+  },
+  "build": {
+   "label": "🏗 Строительство",
+   "name": "строительство",
+   "uni": [
+    "construction",
+    "engineer"
+   ],
+   "college": [
+    "construction"
+   ],
+   "w": 1.5
+  },
+  "mgmt": {
+   "label": "🛒 Менеджмент и торговля",
+   "name": "менеджмент",
+   "uni": [
+    "retail_office",
+    "marketing"
+   ],
+   "college": [
+    "shop",
+    "service"
+   ],
+   "w": 0.5,
+   "by_year": [
+    [
+     1995,
+     3
+    ]
+   ]
+  },
+  "media": {
+   "label": "🎨 Журналистика и дизайн",
+   "name": "журналистику и дизайн",
+   "uni": [
+    "media",
+    "marketing"
+   ],
+   "college": [
+    "media",
+    "beauty"
+   ],
+   "w": 1
+  },
+  "logist": {
+   "label": "🚆 Транспорт и логистика",
+   "name": "транспорт и логистику",
+   "uni": [
+    "transport",
+    "retail_office"
+   ],
+   "college": [
+    "transport"
+   ],
+   "w": 1.5
+  },
+  "agro": {
+   "label": "🌾 Сельское хозяйство",
+   "name": "аграрное направление",
+   "uni": [
+    "agro"
+   ],
+   "college": [
+    "agro"
+   ],
+   "w": 1.5
+  },
+  "tele": {
+   "label": "📶 Связь и электроника",
+   "name": "связь и электронику",
+   "uni": [
+    "telecom",
+    "it"
+   ],
+   "college": [
+    "telecom"
+   ],
+   "w": 1
+  },
+  "service": {
+   "label": "💅 Сфера услуг",
+   "name": "сферу услуг",
+   "uni": [],
+   "college": [
+    "beauty",
+    "service"
+   ],
+   "w": 2.5
+  }
+ },
  "_about": "Профессии и компании. w — насколько профессия распространена (по структуре занятости Росстата), by_year — как меняется со временем. Компания выбирается по году и городу: big — только большие города, cities — конкретные города, left — год ухода из России, successor — кто занял место, renamed — переименования. Собирается скриптом tools/build_careers.py.",
  "fields": {
   "it": {

@@ -172,6 +172,14 @@ function setJob(content, hero, spec, year) {
     id = pickWeighted(hero.r, options.map(([k, f]) => [k, fieldWeight(f, year)]));
   }
   if (spec === 'same' && hero.job) id = hero.job.field;
+  // По специальности: профессия из тех, что открывает направление учёбы героя.
+  if (spec === 'spec') {
+    const sp = C.specs[hero.spec];
+    const edu = hero.flags.includes('uni') ? 'uni' : 'college';
+    const list = sp ? (sp[edu].length ? sp[edu] : sp.uni.concat(sp.college)) : [];
+    id = list.length ? pickWeighted(hero.r, list.map((f) => [f, fieldWeight(C.fields[f], year)])) : null;
+    if (!id) return setJob(content, hero, 'auto', year);
+  }
   const field = C.fields[id];
   const prev = hero.job;
   if (prev) {
@@ -235,6 +243,8 @@ function render(text, hero, content) {
     .replace(/\{company\}/g, () => (hero.job ? companyAt(hero.job, hero.nowYear).n : ''))
     .replace(/\{at_company_old\}/g, () => (hero.job?.old ? hero.job.old.at : ''))
     .replace(/\{company_old\}/g, () => (hero.job?.old ? hero.job.old.n : ''))
+    .replace(/\{spec\}/g, () => (hero.spec && content.careers.specs[hero.spec] ? content.careers.specs[hero.spec].name : ''))
+    .replace(/\{spec\}/g, () => (hero.spec && content.careers.specs[hero.spec] ? content.careers.specs[hero.spec].name : ''))
     .replace(/\{in\}/g, hero.city.in)
     .replace(/\{to\}/g, hero.city.to || hero.city.in)
     .replace(/\{city\}/g, hero.city.name)
@@ -434,6 +444,7 @@ function applyFx(fx, hero, content) {
     // Переезд — новое место работы в той же профессии (своё дело переезжает вместе с хозяином).
     if (hero.job && hero.job.field !== 'business' && !fx.job) setJob(content, hero, 'same', year);
   }
+  if (fx.spec) { hero.spec = fx.spec; for (const f of ['spec', `spec_${fx.spec}`]) if (!hero.flags.includes(f)) hero.flags.push(f); }
   if (fx.job) setJob(content, hero, fx.job, year);
 }
 
@@ -483,7 +494,8 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
   const priority = content.forks.filter((f) => f.priority && f.years).map((f) => [f, calendarDate(f)]).find(([, d]) => d !== null);
   const big = content.forks.find((f) => f.kind === 'big' && inDay(f));
   const smalls = content.forks.filter((f) => f.kind !== 'big' && inDay(f));
-  let fork = big || (priority ? priority[0] : null) || (smalls.length ? pickWeighted(r, smalls.map((f) => [f, f.weight || 1])) : null);
+  const fork = big || (priority ? priority[0] : null) || (smalls.length ? pickWeighted(r, smalls.map((f) => [f, f.weight || 1])) : null);
+  const dayFork = fork;
 
   // Слоты: по одному на каждый год дня, плюс 0–2 лишних, всего событий от 5 до 8.
   const slots = [];
@@ -536,10 +548,14 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
   }
   if (fork && !big && priority && fork === priority[0] && (!deathDate || priority[1] < deathDate)) {
     slots.push({ date: priority[1], year: ageAt(priority[1]), fork: true });
-  } else if (fork && !big && years.length) {
+  } else if (fork && !(big && big.id === 'fk_after_school') && years.length) {
     const ys = years.filter((y) => y >= fork.age[0] && y <= fork.age[1]);
     const y = ys.length ? pick(r, ys) : years[years.length - 1];
-    slots.push({ date: birthAbs + y * 12 + Math.floor(r() * 12), year: y, fork: true });
+    // Сезонная развилка (защита диплома — летом) встаёт в свой месяц.
+    const base = birthAbs + y * 12;
+    let date = base + Math.floor(r() * 12);
+    if (fork.months) { const m = pick(r, fork.months) - 1; date = base + ((m - (base % 12) + 12) % 12); }
+    slots.push({ date, year: y, fork: true });
   }
   slots.sort((a, b) => a.date - b.date || (a.fork ? 1 : 0) - (b.fork ? 1 : 0));
   const times = clockTimes(r, slots.length);
@@ -613,6 +629,7 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
     }
 
     if (slot.fork) {
+      const fork = slot.forkObj || dayFork;
       const d = Math.max(slot.date, hero.lastDate);
       hero.lastDate = d;
       hero.nowYear = Math.floor(d / 12);
@@ -621,7 +638,7 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       // каждый раз разные, с учётом того, насколько профессия распространена в этот год.
       if (fork.pick && options.length > fork.pick) {
         const keep = options.filter((o) => o.always);
-        const pool = options.filter((o) => !o.always).map((o) => [o, o.weight || (o.fx && typeof o.fx.job === 'string' && content.careers.fields[o.fx.job] ? fieldWeight(content.careers.fields[o.fx.job], hero.nowYear) : 1)]);
+        const pool = options.filter((o) => !o.always).map((o) => [o, o.weight || (o.fx && o.fx.spec ? fieldWeight(content.careers.specs[o.fx.spec], hero.nowYear) : o.fx && typeof o.fx.job === 'string' && content.careers.fields[o.fx.job] ? fieldWeight(content.careers.fields[o.fx.job], hero.nowYear) : 1)]);
         const chosenOpts = [];
         while (chosenOpts.length < fork.pick - keep.length && pool.length) {
           const o = pickWeighted(r, pool); chosenOpts.push(o); pool.splice(pool.findIndex(([x]) => x === o), 1);
@@ -630,10 +647,16 @@ function liveDay(hero, content, dayPlan, { chooseFork, meeting } = {}) {
       }
       const chosenIdx = chooseFork ? chooseFork(fork, options) : Math.floor(r() * options.length);
       const chosen = options[chosenIdx];
-      const ft = pickText(fork, hero);
+      // Уточняющий вопрос после другой развилки может звучать короче (chain_texts).
+      const ft = slot.forkObj && fork.chain_texts ? pickText({ texts: fork.chain_texts }, hero) : pickText(fork, hero);
       const forkText = render(ft.text, hero, content);
       applyFx(chosen.fx, hero, content);
       const res = chosen.results ? pick(r, chosen.results) : chosen.result;
+      // Уточняющий вопрос сразу после выбора (например, «куда поступать» → «на какое направление»).
+      if (chosen.fx && chosen.fx.next_fork) {
+        const next = content.forks.find((f) => f.id === chosen.fx.next_fork);
+        if (next) { slots.splice(i + 1, 0, { date: d, fork: true, forkObj: next, fixed: true }); times.splice(i + 1, 0, Math.min(times[i] + 1, 20 * 60)); }
+      }
       hero.forkLog.push({ age: ageAt(d), title: fork.title || fork.text, chosen: chosen.label.replace(/^[^А-Яа-яЁёA-Za-z0-9«]+/, ''), big: fork.kind === 'big' || fork.key });
       out.push({
         clock, label: labelOf(d), type: 'fork', id: fork.id,

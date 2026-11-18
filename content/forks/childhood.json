@@ -171,7 +171,8 @@
               "uni",
               "stayed_home"
             ],
-            "study": 5
+            "study": 5,
+            "next_fork": "fk_specialty"
           }
         },
         {
@@ -192,7 +193,8 @@
               "moved"
             ],
             "move": "big",
-            "happy": 3
+            "happy": 3,
+            "next_fork": "fk_specialty"
           }
         },
         {
@@ -209,7 +211,8 @@
               "moved"
             ],
             "move": "other_capital",
-            "happy": 3
+            "happy": 3,
+            "next_fork": "fk_specialty"
           }
         },
         {
@@ -220,7 +223,8 @@
               "college",
               "stayed_home"
             ],
-            "money": 5
+            "money": 5,
+            "next_fork": "fk_specialty"
           }
         },
         {

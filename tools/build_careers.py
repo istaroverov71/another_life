@@ -335,7 +335,23 @@ F['retail_office']['place'] = ['capital', 'million', 'large']
 for k, f in F.items():
     if k != 'business':
         f['companies'] = [c for c in f['companies']]
-out = {'_about': 'Профессии и компании. w — насколько профессия распространена (по структуре занятости Росстата), '
+# Направления учёбы: какие профессии открывает диплом вуза (uni) и колледжа (college).
+SPECS = {
+ 'it': dict(label='💻 Программирование', name='программирование', uni=['it'], college=['it', 'telecom'], w=0.5, by_year=[[1995, 1.2], [2005, 2], [2012, 3], [2020, 4]]),
+ 'econ': dict(label='📊 Экономика и финансы', name='экономику', uni=['bank', 'accounting', 'audit', 'marketing'], college=['accounting', 'bank', 'shop'], w=2, by_year=[[1995, 5], [2012, 3]]),
+ 'law': dict(label='⚖️ Юриспруденция', name='юридический', uni=['law', 'state'], college=['state', 'law'], w=1.5, by_year=[[1995, 4], [2012, 2.5]]),
+ 'med': dict(label='🩺 Медицина', name='медицину', uni=['doctor'], college=['nurse'], w=2.5),
+ 'ped': dict(label='📚 Педагогика', name='педагогику', uni=['teacher'], college=['teacher'], w=2.5),
+ 'eng': dict(label='⚙️ Инженерия', name='инженерное направление', uni=['engineer', 'oil'], college=['factory', 'oil'], w=3.5, by_year=[[2000, 2.5]]),
+ 'build': dict(label='🏗 Строительство', name='строительство', uni=['construction', 'engineer'], college=['construction'], w=1.5),
+ 'mgmt': dict(label='🛒 Менеджмент и торговля', name='менеджмент', uni=['retail_office', 'marketing'], college=['shop', 'service'], w=0.5, by_year=[[1995, 3]]),
+ 'media': dict(label='🎨 Журналистика и дизайн', name='журналистику и дизайн', uni=['media', 'marketing'], college=['media', 'beauty'], w=1),
+ 'logist': dict(label='🚆 Транспорт и логистика', name='транспорт и логистику', uni=['transport', 'retail_office'], college=['transport'], w=1.5),
+ 'agro': dict(label='🌾 Сельское хозяйство', name='аграрное направление', uni=['agro'], college=['agro'], w=1.5),
+ 'tele': dict(label='📶 Связь и электроника', name='связь и электронику', uni=['telecom', 'it'], college=['telecom'], w=1),
+ 'service': dict(label='💅 Сфера услуг', name='сферу услуг', uni=[], college=['beauty', 'service'], w=2.5),
+}
+out = {'specs': SPECS, '_about': 'Профессии и компании. w — насколько профессия распространена (по структуре занятости Росстата), '
        'by_year — как меняется со временем. Компания выбирается по году и городу: big — только большие города, '
        'cities — конкретные города, left — год ухода из России, successor — кто занял место, renamed — переименования. '
        'Собирается скриптом tools/build_careers.py.', 'fields': F, 'abroad': ABROAD}
