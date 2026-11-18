@@ -113,7 +113,7 @@ ev('ad_new_friend', [28, 50], ['Новый друг во взрослом воз
   'Родители из класса {k1:сына|дочери} стали близкими друзьями семьи: дети дружат, взрослые тоже.'], None, {'social': 3}, 'e')
 ev('ad_10_years_marriage', [30, 50], ['Десять лет вместе. {name} и {spouse} повторили первое свидание: то же кафе, тот же десерт. Официант не поверил.',
   'Годовщина свадьбы. Родители устроили ужин-сюрприз, а дети нарисовали открытку с подписью «Мама и папа, не ругайтесь».'], {'flags': ['married']}, {'happy': 3}, 'e')
-ev('ad_parents_move_close', [32, 55], ['Родители переехали поближе — в соседний район. Теперь бабушка забирает внуков из садика, а {name} привозит ей продукты.'], {'not': ['mom_died', 'abroad']}, None, 'd')
+ev('ad_parents_move_close', [32, 55], ['Родители переехали поближе — в соседний район. Теперь бабушка забирает внуков из садика, а {name} привозит ей продукты.'], {'not': ['mom_died', 'abroad'], 'flags': ['has_kids']}, None, 'd')
 ev('ad_climbing', [24, 45], ['Скалодром по вечерам. {name} впервые залез{|ла} на самую сложную трассу и висит под потолком, боясь посмотреть вниз.'], None, {'health': 2}, 'e')
 ev('ad_home_garden', [25, 60], ['На подоконнике выросли настоящие помидоры. Три штуки, но {name} показывает их всем по видеосвязи.',
   'Фикус, который подарили на новоселье, разросся до потолка. Его пересаживают всей семьёй, как дерево.'], None, None, 'm')
@@ -209,6 +209,9 @@ ev('el_kids_visit_holiday', [65, 99], ['Дети приехали на праз�
 ev('el_lonely_evening', [70, 99], ['Долгий вечер. {name} перебирает в памяти лица, голоса и смешные случаи. Грустно и светло одновременно.'], None, None, 'e')
 
 # Фильтр «not_» не используется: условия заданы явно.
+W = {'ad_wallet_found': 0.2, 'ad_scam_call': 0.5, 'ad_home_garden': 0.3, 'ad_shelter_dog': 0.2, 'ad_inheritance': 0.3, 'ad_marathon': 0.15, 'ad_power_out': 0.4, 'ad_fender_bender': 0.4, 'ad_new_friend': 0.4, 'ad_language': 0.5, 'ad_therapy': 0.4, 'ad_climbing': 0.3, 'ad_road_trip': 0.6, 'mi_neighbour_help': 0.5, 'mi_teacher_meet': 0.4, 'mi_cooking_course': 0.4, 'mi_second_wind': 0.4, 'mi_photo_book': 0.5, 'mi_pet_old': 0.5, 'yo_lost_phone': 0.5, 'yo_first_credit': 0.6}
+for e in E:
+    if e['id'] in W: e['weight'] = W[e['id']]
 json.dump({'_about': 'Новые события по всей жизни, у каждого несколько формулировок. Собирается скриптом tools/extra_events.py.', 'events': E},
           open(os.path.join(ROOT, 'content/events/extra.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
 print('событий:', len(E), 'текстов:', sum(len(e['texts']) for e in E))
